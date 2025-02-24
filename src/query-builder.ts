@@ -12,10 +12,13 @@ import {
   UpdateRow,
 } from './types';
 
-export class QueryBuilder<T extends TableName> {
+export class QueryBuilder<T extends TableName, R = Row<T>> {
   private table: T;
   private selectColumns: string | null = null;
   private whereConditions: string[] = [];
+  private orConditions: string[][] = [];  // OR 조건을 위한 배열 추가
+  private countOption?: 'exact' | 'planned' | 'estimated';
+  private headOption?: boolean;
   private orderByColumns: string[] = [];
   private limitValue?: number;
   private offsetValue?: number;
@@ -24,15 +27,15 @@ export class QueryBuilder<T extends TableName> {
   private queryType: QueryType = 'SELECT';
   private insertData?: InsertRow<T>;
   private updateData?: UpdateRow<T>;
-  private returningSingle: boolean = false;
+  private conflictTarget?: string;
 
   constructor(private pool: Pool, table: T) {
     this.table = table;
     return new Proxy(this, {
-      get(target: QueryBuilder<T>, prop: string | symbol, receiver: any) {
+      get(target: QueryBuilder<T, R>, prop: string | symbol, receiver: any) {
         if (prop === 'then') {
           return (
-            resolve: (value: QueryResult<T> | SingleQueryResult<T>) => void,
+            resolve: (value: QueryResult<R> | SingleQueryResult<R>) => void,
             reject: (reason: any) => void
           ) => {
             return target.execute().then(resolve, reject);
@@ -43,8 +46,16 @@ export class QueryBuilder<T extends TableName> {
     });
   }
 
-  select(columns: string = '*'): this {
+  select(
+    columns: string = '*',
+    options?: {
+      count?: 'exact' | 'planned' | 'estimated',
+      head?: boolean
+    }
+  ): this {
     this.selectColumns = columns;
+    this.countOption = options?.count;
+    this.headOption = options?.head;
     return this;
   }
 
@@ -114,10 +125,87 @@ export class QueryBuilder<T extends TableName> {
     return this;
   }
 
-  single(): Promise<SingleQueryResult<T>> {
+  single(): Promise<SingleQueryResult<R>> {
     this.isSingleResult = true;
-    this.returningSingle = true;
-    return this.execute() as Promise<SingleQueryResult<T>>;
+    return this.execute() as Promise<SingleQueryResult<R>>;
+  }
+
+  ilike(column: string, pattern: string): this {
+    this.whereConditions.push(`"${column}" ILIKE $${this.whereValues.length + 1}`);
+    this.whereValues.push(pattern);
+    return this;
+  }
+
+  or(conditions: string): this {
+    const orParts = conditions.split(',').map(condition => {
+      const [field, op, value] = condition.split('.');
+      
+      // 연산자 검증
+      const validOperators = ['eq', 'neq', 'ilike', 'like', 'gt', 'gte', 'lt', 'lte'];
+      if (!validOperators.includes(op)) {
+        throw new Error(`Invalid operator: ${op}`);
+      }
+
+      // 값 처리
+      let processedValue: any = value;
+      if (value === 'null') {
+        processedValue = null;
+      } else if (!isNaN(Number(value))) {
+        processedValue = value; // 숫자 문자열 그대로 유지
+      } else if (value.match(/^\d{4}-\d{2}-\d{2}/)) {
+        processedValue = value; // 날짜 문자열 그대로 유지
+      }
+      
+      this.whereValues.push(processedValue);
+      const paramIndex = this.whereValues.length;
+
+      // SQL 생성
+      switch (op) {
+        case 'eq':
+          return `"${field}" = $${paramIndex}`;
+        case 'neq':
+          return `"${field}" != $${paramIndex}`;
+        case 'ilike':
+          return `"${field}" ILIKE $${paramIndex}`;
+        case 'like':
+          return `"${field}" LIKE $${paramIndex}`;
+        case 'gt':
+          return `"${field}" > $${paramIndex}`;
+        case 'gte':
+          return `"${field}" >= $${paramIndex}`;
+        case 'lt':
+          return `"${field}" < $${paramIndex}`;
+        case 'lte':
+          return `"${field}" <= $${paramIndex}`;
+        default:
+          return '';
+      }
+    }).filter(Boolean);
+    
+    if (orParts.length > 0) {
+      this.whereConditions.push(`(${orParts.join(' OR ')})`);
+    }
+    return this;
+  }
+
+  returns<NewR>(): QueryBuilder<T, NewR> {
+    return this as unknown as QueryBuilder<T, NewR>;
+  }
+
+  range(from: number, to: number): this {
+    this.limitValue = to - from + 1;
+    this.offsetValue = from;
+    return this;
+  }
+
+  upsert(
+    values: InsertRow<T>,
+    options?: { onConflict: string }
+  ): this {
+    this.queryType = 'UPSERT';
+    this.insertData = values;
+    this.conflictTarget = options?.onConflict;
+    return this;
   }
 
   private shouldReturnData(): boolean {
@@ -128,19 +216,47 @@ export class QueryBuilder<T extends TableName> {
     let query = '';
     let values: any[] = [];
     const returning = this.shouldReturnData() ? ` RETURNING ${this.selectColumns || '*'}` : '';
-
+    
+    // OR 조건 처리를 위한 함수
+    const buildWhereClause = () => {
+      const conditions = [...this.whereConditions];
+      if (this.orConditions.length > 0) {
+        conditions.push(
+          this.orConditions.map(group => `(${group.join(' OR ')})`).join(' AND ')
+        );
+      }
+      return conditions.join(' AND ');
+    };
+    
     switch (this.queryType) {
       case 'SELECT':
-        query = `SELECT ${this.selectColumns || '*'} FROM "${this.table}"`;
+        if (this.headOption) {
+          query = `SELECT COUNT(*) FROM "${this.table}"`;
+        } else {
+          query = `SELECT ${this.selectColumns || '*'} FROM "${this.table}"`;
+          if (this.countOption === 'exact') {
+            query = `SELECT *, COUNT(*) OVER() as exact_count FROM (${query}) subquery`;
+          }
+        }
         values = [...this.whereValues];
         break;
 
       case 'INSERT':
-        if (!this.insertData) throw new Error('No data provided for insert');
+      case 'UPSERT':
+        if (!this.insertData) throw new Error('No data provided for insert/upsert');
         const insertColumns = Object.keys(this.insertData);
         const insertValues = Object.values(this.insertData);
         const insertPlaceholders = insertValues.map((_, i) => `$${i + 1}`).join(',');
-        query = `INSERT INTO "${this.table}" ("${insertColumns.join('","')}") VALUES (${insertPlaceholders})${returning}`;
+        query = `INSERT INTO "${this.table}" ("${insertColumns.join('","')}") VALUES (${insertPlaceholders})`;
+        
+        if (this.queryType === 'UPSERT' && this.conflictTarget) {
+          query += ` ON CONFLICT (${this.conflictTarget}) DO UPDATE SET `;
+          query += insertColumns
+            .map((col) => `"${col}" = EXCLUDED."${col}"`)
+            .join(', ');
+        }
+        
+        query += returning;
         values = [...insertValues];
         break;
 
@@ -200,7 +316,7 @@ export class QueryBuilder<T extends TableName> {
     return { query, values };
   }
 
-  async execute(): Promise<QueryResult<T> | SingleQueryResult<T>> {
+  async execute(): Promise<QueryResult<R> | SingleQueryResult<R>> {
     try {
       const { query, values } = this.buildQuery();
       const result = await this.pool.query(query, values);
@@ -212,7 +328,7 @@ export class QueryBuilder<T extends TableName> {
           count: result.rowCount,
           status: 200,
           statusText: 'OK',
-        } as QueryResult<T>;
+        } as QueryResult<R>;
       }
 
       if (this.queryType === 'UPDATE' && !this.shouldReturnData()) {
@@ -222,7 +338,7 @@ export class QueryBuilder<T extends TableName> {
           count: result.rowCount,
           status: 200,
           statusText: 'OK',
-        } as QueryResult<T>;
+        } as QueryResult<R>;
       }
 
       if (this.queryType === 'INSERT' && !this.shouldReturnData()) {
@@ -262,7 +378,7 @@ export class QueryBuilder<T extends TableName> {
           count: 1,
           status: 200,
           statusText: 'OK',
-        } as SingleQueryResult<T>;
+        } as SingleQueryResult<R>;
       }
 
       return {
@@ -271,7 +387,7 @@ export class QueryBuilder<T extends TableName> {
         count: result.rowCount,
         status: 200,
         statusText: 'OK',
-      } as QueryResult<T>;
+      } as QueryResult<R>;
     } catch (err: any) {
       return {
         data: null,
