@@ -40,7 +40,7 @@ export interface StorageConfig {
   allowedMimeTypes?: string[];
 }
 
-export type QueryType = 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE';
+export type QueryType = 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'UPSERT';
 
 export interface QueryOptions {
   limit?: number;
@@ -57,21 +57,21 @@ export interface FilterOptions {
   value: any;
 }
 
-export interface QueryResult<T extends TableName> {
-  data: Row<T>[] | null;
+export type BaseResult = {
   error: PostgresError | null;
-  count?: number | null;
-  status?: number;
-  statusText?: string;
-}
+  count: number | null;
+  status: number;
+  statusText: string;
+  statusCode?: number;
+};
 
-export interface SingleQueryResult<T extends TableName> {
-  data: Row<T> | null;
-  error: PostgresError | null;
-  count?: number | null;
-  status?: number;
-  statusText?: string;
-}
+export type QueryResult<T = any> = BaseResult & {
+  data: T[] | null;
+};
+
+export type SingleQueryResult<T = any> = BaseResult & {
+  data: T | null;
+};
 
 export interface AuthResponse {
   user: any | null;
