@@ -1,10 +1,12 @@
 import { Pool } from 'pg';
 import { QueryBuilder } from './query-builder';
 import { PostgresError } from './errors';
-import { TableName, PostgresConfig } from './types';
+import { TableName, PostgresConfig, Row } from './types';
 
 export class PostgresClient {
   private pool: Pool;
+  private client: any | null = null;
+  private isTransaction: boolean = false;
 
   constructor(config?: PostgresConfig) {
     this.pool = new Pool({
@@ -23,8 +25,52 @@ export class PostgresClient {
     });
   }
 
-  from<T extends TableName>(table: T): QueryBuilder<T> {
-    return new QueryBuilder<T>(this.pool, table);
+  // 트랜잭션 시작
+  async begin(): Promise<void> {
+    if (!this.client) {
+      this.client = await this.pool.connect();
+    }
+    await this.client.query('BEGIN');
+    this.isTransaction = true;
+  }
+
+  // 트랜잭션 커밋
+  async commit(): Promise<void> {
+    if (this.isTransaction && this.client) {
+      await this.client.query('COMMIT');
+      this.client.release();
+      this.client = null;
+      this.isTransaction = false;
+    }
+  }
+
+  // 트랜잭션 롤백
+  async rollback(): Promise<void> {
+    if (this.isTransaction && this.client) {
+      await this.client.query('ROLLBACK');
+      this.client.release();
+      this.client = null;
+      this.isTransaction = false;
+    }
+  }
+
+  // 트랜잭션 실행
+  async transaction<T>(
+    callback: (client: PostgresClient) => Promise<T>
+  ): Promise<T> {
+    await this.begin();
+    try {
+      const result = await callback(this);
+      await this.commit();
+      return result;
+    } catch (error) {
+      await this.rollback();
+      throw error;
+    }
+  }
+
+  from<T extends TableName>(table: T): QueryBuilder<T, Row<T>> {
+    return new QueryBuilder<T, Row<T>>(this.pool, table);
   }
 
   async rpc(
@@ -84,4 +130,4 @@ export class PostgresClient {
   }
 }
 
-export const postgresClient = new PostgresClient();
+export const postgresAdmin = new PostgresClient();
