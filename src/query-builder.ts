@@ -12,7 +12,8 @@ import {
   UpdateRow,
 } from './types';
 
-export class QueryBuilder<T extends TableName, R = Row<T>> {
+export class QueryBuilder<T extends TableName, R = Row<T>> implements Promise<QueryResult<R> | SingleQueryResult<R>> {
+  readonly [Symbol.toStringTag] = 'QueryBuilder';
   private table: T;
   private selectColumns: string | null = null;
   private whereConditions: string[] = [];
@@ -31,19 +32,23 @@ export class QueryBuilder<T extends TableName, R = Row<T>> {
 
   constructor(private pool: Pool, table: T) {
     this.table = table;
-    return new Proxy(this, {
-      get(target: QueryBuilder<T, R>, prop: string | symbol, receiver: any) {
-        if (prop === 'then') {
-          return (
-            resolve: (value: QueryResult<R> | SingleQueryResult<R>) => void,
-            reject: (reason: any) => void
-          ) => {
-            return target.execute().then(resolve, reject);
-          };
-        }
-        return Reflect.get(target, prop, receiver);
-      },
-    });
+  }
+
+  then<TResult1 = QueryResult<R> | SingleQueryResult<R>, TResult2 = never>(
+    onfulfilled?: ((value: QueryResult<R> | SingleQueryResult<R>) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
+  ): Promise<TResult1 | TResult2> {
+    return this.execute().then(onfulfilled, onrejected);
+  }
+
+  catch<TResult = never>(
+    onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null
+  ): Promise<QueryResult<R> | SingleQueryResult<R> | TResult> {
+    return this.execute().catch(onrejected);
+  }
+
+  finally(onfinally?: (() => void) | null): Promise<QueryResult<R> | SingleQueryResult<R>> {
+    return this.execute().finally(onfinally);
   }
 
   select(
