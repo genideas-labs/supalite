@@ -1,80 +1,25 @@
 import { PostgresError } from './errors';
 
-export interface DefaultSchema {
+export interface TableBase {
+  Row: any;
+  Insert: any;
+  Update: any;
+  Relationships: unknown[];
+}
+
+export interface DatabaseSchema {
   Tables: {
-    [key: string]: {
-      Row: Record<string, unknown>;
-      Insert: Record<string, unknown>;
-      Update: Record<string, unknown>;
-      Relationships: unknown[];
-    };
-  };
-  Views: {
-    [key: string]: {
-      Row: Record<string, unknown>;
-    };
-  };
-  Functions: {
-    [key: string]: {
-      Args: Record<string, unknown>;
-      Returns: unknown;
-    };
-  };
-  Enums: {
-    [key: string]: string[];
-  };
-  CompositeTypes: {
-    [key: string]: {
-      [key: string]: unknown;
-    };
+    [key: string]: TableBase;
   };
 }
 
-export interface SchemaBase {
-  Tables: {
-    [key: string]: {
-      Row: Record<string, unknown>;
-      Insert: Record<string, unknown>;
-      Update: Record<string, unknown>;
-      Relationships: unknown[];
-    };
-  };
-  Views: {
-    [key: string]: {
-      Row: Record<string, unknown>;
-    };
-  };
-  Functions: {
-    [key: string]: {
-      Args: Record<string, unknown>;
-      Returns: unknown;
-    };
-  };
-  Enums: {
-    [key: string]: string[];
-  };
-  CompositeTypes: {
-    [key: string]: {
-      [key: string]: unknown;
-    };
-  };
-}
-
-export type DatabaseSchema<T extends SchemaBase = DefaultSchema> = {
-  [K in keyof T]: T[K];
-};
-
-export type TableName<T extends SchemaBase = DefaultSchema> = keyof T['Tables'];
-export type ViewName<T extends SchemaBase = DefaultSchema> = keyof T['Views'];
-export type FunctionName<T extends SchemaBase = DefaultSchema> = keyof T['Functions'];
-export type EnumName<T extends SchemaBase = DefaultSchema> = keyof T['Enums'];
-export type Row<T extends SchemaBase = DefaultSchema, K extends TableName<T> = TableName<T>> = T['Tables'][K]['Row'];
-export type InsertRow<T extends SchemaBase = DefaultSchema, K extends TableName<T> = TableName<T>> = T['Tables'][K]['Insert'];
-export type UpdateRow<T extends SchemaBase = DefaultSchema, K extends TableName<T> = TableName<T>> = T['Tables'][K]['Update'] & {
+export type TableName<T extends DatabaseSchema> = keyof T['Tables'];
+export type Row<T extends DatabaseSchema, K extends TableName<T>> = T['Tables'][K]['Row'];
+export type InsertRow<T extends DatabaseSchema, K extends TableName<T>> = T['Tables'][K]['Insert'];
+export type UpdateRow<T extends DatabaseSchema, K extends TableName<T>> = T['Tables'][K]['Update'] & {
   modified_at?: string;
   updated_at?: string;
 };
-
 
 export interface SupaliteConfig {
   user?: string;
@@ -85,7 +30,6 @@ export interface SupaliteConfig {
   ssl?: boolean;
   schema?: string;
 }
-
 
 export type QueryType = 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'UPSERT';
 
