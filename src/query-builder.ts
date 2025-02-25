@@ -7,15 +7,24 @@ import {
   FilterOptions,
   QueryResult,
   SingleQueryResult,
-  DatabaseSchema
+  DatabaseSchema,
+  SchemaName,
+  Row,
+  InsertRow,
+  UpdateRow
 } from './types';
 
-export class QueryBuilder<T extends DatabaseSchema, K extends TableName<T>> implements Promise<QueryResult<T['Tables'][K]['Row']> | SingleQueryResult<T['Tables'][K]['Row']>> {
+export class QueryBuilder<
+  T extends DatabaseSchema,
+  S extends SchemaName<T> = 'public',
+  K extends TableName<T, S> = TableName<T, S>
+> implements Promise<QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>>> {
   readonly [Symbol.toStringTag] = 'QueryBuilder';
   private table: K;
+  private schema: S;
   private selectColumns: string | null = null;
   private whereConditions: string[] = [];
-  private orConditions: string[][] = [];  // OR 조건을 위한 배열 추가
+  private orConditions: string[][] = [];
   private countOption?: 'exact' | 'planned' | 'estimated';
   private headOption?: boolean;
   private orderByColumns: string[] = [];
@@ -24,16 +33,17 @@ export class QueryBuilder<T extends DatabaseSchema, K extends TableName<T>> impl
   private whereValues: any[] = [];
   private isSingleResult: boolean = false;
   private queryType: QueryType = 'SELECT';
-  private insertData?: T['Tables'][K]['Insert'] | T['Tables'][K]['Insert'][];
-  private updateData?: T['Tables'][K]['Update'];
+  private insertData?: InsertRow<T, S, K> | InsertRow<T, S, K>[];
+  private updateData?: UpdateRow<T, S, K>;
   private conflictTarget?: string;
 
-  constructor(private pool: Pool, table: K) {
+  constructor(private pool: Pool, table: K, schema: S = 'public' as S) {
     this.table = table;
+    this.schema = schema;
   }
 
-  then<TResult1 = QueryResult<T['Tables'][K]['Row']> | SingleQueryResult<T['Tables'][K]['Row']>, TResult2 = never>(
-    onfulfilled?: ((value: QueryResult<T['Tables'][K]['Row']> | SingleQueryResult<T['Tables'][K]['Row']>) => TResult1 | PromiseLike<TResult1>) | null,
+  then<TResult1 = QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>>, TResult2 = never>(
+    onfulfilled?: ((value: QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>>) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
   ): Promise<TResult1 | TResult2> {
     return this.execute().then(onfulfilled, onrejected);
@@ -41,11 +51,11 @@ export class QueryBuilder<T extends DatabaseSchema, K extends TableName<T>> impl
 
   catch<TResult = never>(
     onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null
-  ): Promise<QueryResult<T['Tables'][K]['Row']> | SingleQueryResult<T['Tables'][K]['Row']> | TResult> {
+  ): Promise<QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>> | TResult> {
     return this.execute().catch(onrejected);
   }
 
-  finally(onfinally?: (() => void) | null): Promise<QueryResult<T['Tables'][K]['Row']> | SingleQueryResult<T['Tables'][K]['Row']>> {
+  finally(onfinally?: (() => void) | null): Promise<QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>>> {
     return this.execute().finally(onfinally);
   }
 
@@ -128,9 +138,9 @@ export class QueryBuilder<T extends DatabaseSchema, K extends TableName<T>> impl
     return this;
   }
 
-  single(): Promise<SingleQueryResult<T['Tables'][K]['Row']>> {
+  single(): Promise<SingleQueryResult<Row<T, S, K>>> {
     this.isSingleResult = true;
-    return this.execute() as Promise<SingleQueryResult<T['Tables'][K]['Row']>>;
+    return this.execute() as Promise<SingleQueryResult<Row<T, S, K>>>;
   }
 
   ilike(column: string, pattern: string): this {
@@ -143,26 +153,23 @@ export class QueryBuilder<T extends DatabaseSchema, K extends TableName<T>> impl
     const orParts = conditions.split(',').map(condition => {
       const [field, op, value] = condition.split('.');
       
-      // 연산자 검증
       const validOperators = ['eq', 'neq', 'ilike', 'like', 'gt', 'gte', 'lt', 'lte'];
       if (!validOperators.includes(op)) {
         throw new Error(`Invalid operator: ${op}`);
       }
 
-      // 값 처리
       let processedValue: any = value;
       if (value === 'null') {
         processedValue = null;
       } else if (!isNaN(Number(value))) {
-        processedValue = value; // 숫자 문자열 그대로 유지
+        processedValue = value;
       } else if (value.match(/^\d{4}-\d{2}-\d{2}/)) {
-        processedValue = value; // 날짜 문자열 그대로 유지
+        processedValue = value;
       }
       
       this.whereValues.push(processedValue);
       const paramIndex = this.whereValues.length;
 
-      // SQL 생성
       switch (op) {
         case 'eq':
           return `"${field}" = $${paramIndex}`;
@@ -191,8 +198,8 @@ export class QueryBuilder<T extends DatabaseSchema, K extends TableName<T>> impl
     return this;
   }
 
-  returns<NewK extends TableName<T>>(): QueryBuilder<T, NewK> {
-    return this as unknown as QueryBuilder<T, NewK>;
+  returns<NewS extends SchemaName<T>, NewK extends TableName<T, NewS>>(): QueryBuilder<T, NewS, NewK> {
+    return this as unknown as QueryBuilder<T, NewS, NewK>;
   }
 
   range(from: number, to: number): this {
@@ -202,7 +209,7 @@ export class QueryBuilder<T extends DatabaseSchema, K extends TableName<T>> impl
   }
 
   upsert(
-    values: T['Tables'][K]['Insert'],
+    values: InsertRow<T, S, K>,
     options?: { onConflict: string }
   ): this {
     this.queryType = 'UPSERT';
@@ -227,7 +234,6 @@ export class QueryBuilder<T extends DatabaseSchema, K extends TableName<T>> impl
       );
     }
 
-    // UPDATE 쿼리의 경우 파라미터 인덱스 조정
     if (updateValues) {
       return ' WHERE ' + conditions
         .map(cond => cond.replace(/\$(\d+)/g, (match, num) => 
@@ -243,13 +249,14 @@ export class QueryBuilder<T extends DatabaseSchema, K extends TableName<T>> impl
     let values: any[] = [];
     let insertColumns: string[] = [];
     const returning = this.shouldReturnData() ? ` RETURNING ${this.selectColumns || '*'}` : '';
+    const schemaTable = `"${String(this.schema)}"."${String(this.table)}"`;
     
     switch (this.queryType) {
       case 'SELECT':
         if (this.headOption) {
-          query = `SELECT COUNT(*) FROM "${String(this.table)}"`;
+          query = `SELECT COUNT(*) FROM ${schemaTable}`;
         } else {
-          query = `SELECT ${this.selectColumns || '*'} FROM "${String(this.table)}"`;
+          query = `SELECT ${this.selectColumns || '*'} FROM ${schemaTable}`;
           if (this.countOption === 'exact') {
             query = `SELECT *, COUNT(*) OVER() as exact_count FROM (${query}) subquery`;
           }
@@ -262,7 +269,6 @@ export class QueryBuilder<T extends DatabaseSchema, K extends TableName<T>> impl
         if (!this.insertData) throw new Error('No data provided for insert/upsert');
         
         if (Array.isArray(this.insertData)) {
-          // 여러 row 처리
           const rows = this.insertData;
           if (rows.length === 0) throw new Error('Empty array provided for insert');
           
@@ -272,14 +278,13 @@ export class QueryBuilder<T extends DatabaseSchema, K extends TableName<T>> impl
             `(${insertColumns.map((_, j) => `$${i * insertColumns.length + j + 1}`).join(',')})`
           ).join(',');
           
-          query = `INSERT INTO "${String(this.table)}" ("${insertColumns.join('","')}") VALUES ${placeholders}`;
+          query = `INSERT INTO ${schemaTable} ("${insertColumns.join('","')}") VALUES ${placeholders}`;
         } else {
-          // 단일 row 처리
           const insertData = this.insertData as Record<string, unknown>;
           insertColumns = Object.keys(insertData);
           values = Object.values(insertData);
           const insertPlaceholders = values.map((_, i) => `$${i + 1}`).join(',');
-          query = `INSERT INTO "${String(this.table)}" ("${insertColumns.join('","')}") VALUES (${insertPlaceholders})`;
+          query = `INSERT INTO ${schemaTable} ("${insertColumns.join('","')}") VALUES (${insertPlaceholders})`;
         }
         
         if (this.queryType === 'UPSERT' && this.conflictTarget) {
@@ -308,14 +313,14 @@ export class QueryBuilder<T extends DatabaseSchema, K extends TableName<T>> impl
         const setColumns = Object.keys(updateData).map(
           (key, index) => `"${String(key)}" = $${index + 1}`
         );
-        query = `UPDATE "${String(this.table)}" SET ${setColumns.join(', ')}`;
+        query = `UPDATE ${schemaTable} SET ${setColumns.join(', ')}`;
         values = [...updateValues, ...this.whereValues];
         query += this.buildWhereClause(updateValues);
         query += returning;
         break;
 
       case 'DELETE':
-        query = `DELETE FROM "${String(this.table)}"`;
+        query = `DELETE FROM ${schemaTable}`;
         values = [...this.whereValues];
         query += this.buildWhereClause();
         query += returning;
@@ -341,7 +346,7 @@ export class QueryBuilder<T extends DatabaseSchema, K extends TableName<T>> impl
     return { query, values };
   }
 
-  async execute(): Promise<QueryResult<T['Tables'][K]['Row']> | SingleQueryResult<T['Tables'][K]['Row']>> {
+  async execute(): Promise<QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>>> {
     try {
       const { query, values } = this.buildQuery();
       const result = await this.pool.query(query, values);
@@ -353,7 +358,7 @@ export class QueryBuilder<T extends DatabaseSchema, K extends TableName<T>> impl
           count: result.rowCount,
           status: 200,
           statusText: 'OK',
-        } as QueryResult<T['Tables'][K]['Row']>;
+        } as QueryResult<Row<T, S, K>>;
       }
 
       if (this.queryType === 'UPDATE' && !this.shouldReturnData()) {
@@ -363,7 +368,7 @@ export class QueryBuilder<T extends DatabaseSchema, K extends TableName<T>> impl
           count: result.rowCount,
           status: 200,
           statusText: 'OK',
-        } as QueryResult<T['Tables'][K]['Row']>;
+        } as QueryResult<Row<T, S, K>>;
       }
 
       if (this.queryType === 'INSERT' && !this.shouldReturnData()) {
@@ -403,7 +408,7 @@ export class QueryBuilder<T extends DatabaseSchema, K extends TableName<T>> impl
           count: 1,
           status: 200,
           statusText: 'OK',
-        } as SingleQueryResult<T['Tables'][K]['Row']>;
+        } as SingleQueryResult<Row<T, S, K>>;
       }
 
       return {
@@ -412,7 +417,7 @@ export class QueryBuilder<T extends DatabaseSchema, K extends TableName<T>> impl
         count: result.rowCount,
         status: 200,
         statusText: 'OK',
-      } as QueryResult<T['Tables'][K]['Row']>;
+      } as QueryResult<Row<T, S, K>>;
     } catch (err: any) {
       return {
         data: null,
@@ -424,13 +429,13 @@ export class QueryBuilder<T extends DatabaseSchema, K extends TableName<T>> impl
     }
   }
 
-  insert(data: T['Tables'][K]['Insert'] | T['Tables'][K]['Insert'][]): this {
+  insert(data: InsertRow<T, S, K> | InsertRow<T, S, K>[]): this {
     this.queryType = 'INSERT';
     this.insertData = data;
     return this;
   }
 
-  update(data: T['Tables'][K]['Update']): this {
+  update(data: UpdateRow<T, S, K>): this {
     this.queryType = 'UPDATE';
     this.updateData = data;
     return this;
