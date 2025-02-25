@@ -1,25 +1,82 @@
-import { Database } from './database.types';
 import { PostgresError } from './errors';
 
-export type TableName = keyof Database['public']['Tables'];
-export type Row<T extends TableName> = Database['public']['Tables'][T]['Row'];
-export type InsertRow<T extends TableName> = Database['public']['Tables'][T]['Insert'];
-export type UpdateRow<T extends TableName> = Database['public']['Tables'][T]['Update'] & {
+export interface DefaultSchema {
+  Tables: {
+    [key: string]: {
+      Row: Record<string, unknown>;
+      Insert: Record<string, unknown>;
+      Update: Record<string, unknown>;
+      Relationships: unknown[];
+    };
+  };
+  Views: {
+    [key: string]: {
+      Row: Record<string, unknown>;
+    };
+  };
+  Functions: {
+    [key: string]: {
+      Args: Record<string, unknown>;
+      Returns: unknown;
+    };
+  };
+  Enums: {
+    [key: string]: string[];
+  };
+  CompositeTypes: {
+    [key: string]: {
+      [key: string]: unknown;
+    };
+  };
+}
+
+export interface SchemaBase {
+  Tables: {
+    [key: string]: {
+      Row: Record<string, unknown>;
+      Insert: Record<string, unknown>;
+      Update: Record<string, unknown>;
+      Relationships: unknown[];
+    };
+  };
+  Views: {
+    [key: string]: {
+      Row: Record<string, unknown>;
+    };
+  };
+  Functions: {
+    [key: string]: {
+      Args: Record<string, unknown>;
+      Returns: unknown;
+    };
+  };
+  Enums: {
+    [key: string]: string[];
+  };
+  CompositeTypes: {
+    [key: string]: {
+      [key: string]: unknown;
+    };
+  };
+}
+
+export type DatabaseSchema<T extends SchemaBase = DefaultSchema> = {
+  [K in keyof T]: T[K];
+};
+
+export type TableName<T extends SchemaBase = DefaultSchema> = keyof T['Tables'];
+export type ViewName<T extends SchemaBase = DefaultSchema> = keyof T['Views'];
+export type FunctionName<T extends SchemaBase = DefaultSchema> = keyof T['Functions'];
+export type EnumName<T extends SchemaBase = DefaultSchema> = keyof T['Enums'];
+export type Row<T extends SchemaBase = DefaultSchema, K extends TableName<T> = TableName<T>> = T['Tables'][K]['Row'];
+export type InsertRow<T extends SchemaBase = DefaultSchema, K extends TableName<T> = TableName<T>> = T['Tables'][K]['Insert'];
+export type UpdateRow<T extends SchemaBase = DefaultSchema, K extends TableName<T> = TableName<T>> = T['Tables'][K]['Update'] & {
   modified_at?: string;
   updated_at?: string;
 };
 
-export interface SupabaseConfig {
-  supabaseUrl: string;
-  supabaseKey: string;
-  schema?: string;
-  autoRefreshToken?: boolean;
-  persistSession?: boolean;
-  detectSessionInUrl?: boolean;
-  headers?: Record<string, string>;
-}
 
-export interface PostgresConfig {
+export interface SupaliteConfig {
   user?: string;
   host?: string;
   database?: string;
@@ -29,16 +86,6 @@ export interface PostgresConfig {
   schema?: string;
 }
 
-export interface AuthConfig {
-  autoRefreshToken?: boolean;
-  persistSession?: boolean;
-  detectSessionInUrl?: boolean;
-}
-
-export interface StorageConfig {
-  maxFileSize?: number;
-  allowedMimeTypes?: string[];
-}
 
 export type QueryType = 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'UPSERT';
 
@@ -72,22 +119,3 @@ export type QueryResult<T = any> = BaseResult & {
 export type SingleQueryResult<T = any> = BaseResult & {
   data: T | null;
 };
-
-export interface AuthResponse {
-  user: any | null;
-  session: any | null;
-  error: Error | null;
-}
-
-export interface StorageResponse {
-  data: {
-    path: string;
-    id: string;
-  } | null;
-  error: Error | null;
-}
-
-export interface RealtimeSubscription {
-  subscribe(callback: (payload: any) => void): void;
-  unsubscribe(): void;
-}
