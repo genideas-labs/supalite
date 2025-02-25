@@ -1,7 +1,7 @@
 {
-  "name": "supabase-client-clone",
+  "name": "supalite",
   "version": "1.0.0",
-  "description": "A TypeScript library for Supabase client clone",
+  "description": "A lightweight TypeScript PostgreSQL client with Supabase-style API",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -15,15 +15,19 @@
   },
   "keywords": [
     "supabase",
-    "client",
-    "typescript"
+    "postgresql",
+    "typescript",
+    "database",
+    "lightweight",
+    "query-builder"
   ],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "pg": "^8.11.3",
-    "jwt-decode": "^4.0.0",
     "cross-fetch": "^4.0.0",
+    "dotenv": "^16.4.7",
+    "jwt-decode": "^4.0.0",
+    "pg": "^8.11.3",
     "websocket": "^1.0.34"
   },
   "devDependencies": {

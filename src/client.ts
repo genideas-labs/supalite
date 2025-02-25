@@ -1,12 +1,12 @@
 import { SupabaseConfig, QueryOptions, FilterOptions } from './types';
-import { PostgresClient } from './postgres-client';
+import { SupaLitePG } from './postgres-client';
 import { TableName } from './types';
 
 export class SupabaseClient {
-  private postgresClient: PostgresClient;
+  private postgresClient: SupaLitePG;
 
   constructor(private config: SupabaseConfig) {
-    this.postgresClient = new PostgresClient({
+    this.postgresClient = new SupaLitePG({
       host: new URL(config.supabaseUrl).hostname,
       database: 'postgres',
       user: 'postgres',

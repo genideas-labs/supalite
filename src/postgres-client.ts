@@ -2,21 +2,33 @@ import { Pool } from 'pg';
 import { QueryBuilder } from './query-builder';
 import { PostgresError } from './errors';
 import { TableName, PostgresConfig, Row } from './types';
+import { config as dotenvConfig } from 'dotenv';
 
-export class PostgresClient {
+// .env 파일 로드
+dotenvConfig();
+
+export class SupaLitePG {
   private pool: Pool;
   private client: any | null = null;
   private isTransaction: boolean = false;
 
   constructor(config?: PostgresConfig) {
-    this.pool = new Pool({
+    const poolConfig = {
       user: config?.user || process.env.DB_USER,
       host: config?.host || process.env.DB_HOST,
       database: config?.database || process.env.DB_NAME,
       password: config?.password || process.env.DB_PASS,
       port: config?.port || Number(process.env.DB_PORT) || 5432,
       ssl: config?.ssl || process.env.DB_SSL === 'true',
+    };
+
+    // 디버그용 로그 (비밀번호는 제외)
+    console.log('Database connection config:', {
+      ...poolConfig,
+      password: '********'
     });
+
+    this.pool = new Pool(poolConfig);
 
     // Error handling
     this.pool.on('error', (err) => {
@@ -56,7 +68,7 @@ export class PostgresClient {
 
   // 트랜잭션 실행
   async transaction<T>(
-    callback: (client: PostgresClient) => Promise<T>
+    callback: (client: SupaLitePG) => Promise<T>
   ): Promise<T> {
     await this.begin();
     try {
@@ -130,4 +142,4 @@ export class PostgresClient {
   }
 }
 
-export const postgresAdmin = new PostgresClient();
+export const supalitePg = new SupaLitePG();

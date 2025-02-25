@@ -1,6 +1,6 @@
-# PostgreSQL Client Library
+# SupaLite
 
-PostgreSQL 데이터베이스를 위한 타입스크립트 기반의 강력한 클라이언트 라이브러리입니다. Supabase와 동일한 API를 제공하여 쉽게 마이그레이션하고 사용할 수 있습니다.
+가볍고 효율적인 PostgreSQL 클라이언트 라이브러리입니다. Supabase와 동일한 API를 제공하면서도 더 가볍고 빠른 구현을 제공합니다.
 
 ## 주요 기능
 
@@ -16,7 +16,7 @@ PostgreSQL 데이터베이스를 위한 타입스크립트 기반의 강력한 �
 ## 설치 방법
 
 ```bash
-npm install @genideas/postgres-client
+npm install supalite
 ```
 
 ## 사용 예시
@@ -25,10 +25,10 @@ npm install @genideas/postgres-client
 
 #### 기존 pg 라이브러리 스타일
 ```typescript
-import { PostgresClient } from '@genideas/postgres-client';
+import { SupaLitePG } from 'supalite';
 
 // 기존 pg 설정 방식과 동일
-const db = new PostgresClient({
+const db = new SupaLitePG({
   user: 'dbuser',
   host: 'database.server.com',
   database: 'mydb',
@@ -38,7 +38,7 @@ const db = new PostgresClient({
 });
 
 // 또는 환경 변수 사용 (자동으로 process.env 값을 사용)
-const db = new PostgresClient();
+const db = new SupaLitePG();
 
 // 기존 pg 스타일 쿼리
 const result = await db.pool.query(
@@ -57,17 +57,17 @@ const { data, error } = await db
 #### Supabase 스타일
 
 ```typescript
-import { postgresAdmin } from '@genideas/postgres-client';
+import { supalitePg } from 'supalite';
 
 // 데이터 조회
-const { data, error } = await postgresAdmin
+const { data, error } = await supalitePg
   .from('users')
   .select('*')
   .eq('id', 1)
   .single();
 
 // 데이터 삽입
-const { data, error } = await postgresAdmin
+const { data, error } = await supalitePg
   .from('users')
   .insert({ 
     name: '홍길동', 
@@ -75,7 +75,7 @@ const { data, error } = await postgresAdmin
   });
 
 // RPC 호출
-const { data, error } = await postgresAdmin
+const { data, error } = await supalitePg
   .rpc('calculate_total', { x: 1, y: 2 });
 ```
 
@@ -83,7 +83,7 @@ const { data, error } = await postgresAdmin
 
 ```typescript
 // 트랜잭션 사용
-await postgresAdmin.transaction(async (client) => {
+await supalitePg.transaction(async (client) => {
   const { data: user } = await client
     .from('users')
     .insert({ name: '홍길동' })
@@ -96,7 +96,7 @@ await postgresAdmin.transaction(async (client) => {
 });
 
 // UPSERT 작업
-const { data, error } = await postgresAdmin
+const { data, error } = await supalitePg
   .from('users')
   .upsert(
     { id: 1, name: '홍길동', updated_at: new Date().toISOString() },
@@ -104,17 +104,17 @@ const { data, error } = await postgresAdmin
   );
 
 // OR 조건 필터링
-const { data, error } = await postgresAdmin
+const { data, error } = await supalitePg
   .from('users')
   .or('status.eq.active,role.eq.admin');
 
 // 대소문자 구분 없는 검색
-const { data, error } = await postgresAdmin
+const { data, error } = await supalitePg
   .from('users')
   .ilike('email', '%@example.com');
 
 // 정확한 카운트와 함께 조회
-const { data, count, error } = await postgresAdmin
+const { data, count, error } = await supalitePg
   .from('users')
   .select('*', { count: 'exact' });
 ```
@@ -155,7 +155,7 @@ const { data, count, error } = await postgresAdmin
 
 ### 트랜잭션 메소드
 
-- `transaction<T>(callback: (client: PostgresClient) => Promise<T>)`: 트랜잭션 실행
+- `transaction<T>(callback: (client: SupaLitePG) => Promise<T>)`: 트랜잭션 실행
 - `begin()`: 트랜잭션 시작
 - `commit()`: 트랜잭션 커밋
 - `rollback()`: 트랜잭션 롤백
@@ -189,9 +189,14 @@ interface QueryResponse<T> {
 
 ## 개발 환경 설정
 
+### PostgreSQL 설치
+PostgreSQL을 로컬에 설치하고 테스트하는 방법은 [examples/README.md](examples/README.md)를 참조하세요.
+
+### 프로젝트 설정
+
 ```bash
 # 저장소 클론
-git clone https://github.com/your-username/supabase-client-clone.git
+git clone https://github.com/your-username/supalite.git
 
 # 의존성 설치
 npm install
