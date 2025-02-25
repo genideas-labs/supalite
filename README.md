@@ -1,6 +1,6 @@
 # SupaLite
 
-[![npm version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://www.npmjs.com/package/supalite)
+[![npm version](https://img.shields.io/badge/version-0.1.1-blue.svg)](https://www.npmjs.com/package/supalite)
 
 가볍고 효율적인 PostgreSQL 클라이언트 라이브러리입니다. Supabase와 동일한 API를 제공하면서도 더 가볍고 빠른 구현을 제공합니다.
 
@@ -8,6 +8,7 @@
 
 - 🔒 타입 안전성: TypeScript로 작성되어 완벽한 타입 지원
 - 🚀 강력한 쿼리 빌더: Supabase 스타일의 직관적이고 체이닝 가능한 API
+- 🌍 멀티 스키마: 여러 데이터베이스 스키마 지원
 - 🛠 CRUD 작업: 간단하고 명확한 데이터베이스 작업
 - 📦 RPC 지원: 저장 프로시저 호출 기능
 - ⚡ 성능 최적화: 커넥션 풀링 및 효율적인 쿼리 실행
@@ -15,6 +16,7 @@
 - 🎯 UPSERT 지원: 삽입/업데이트 동작 제어
 - 🔍 고급 필터링: OR 조건, ILIKE 검색 등 지원
 - 📚 배열 작업: 다중 레코드 삽입 및 배열 데이터 처리
+- 🔄 Views, Functions, Enums 지원: Supabase 스타일의 완벽한 타입 지원
 
 ## 설치 방법
 
@@ -46,32 +48,44 @@ const client = new SupaLitePG<Database>();
 
 // Database 인터페이스 예시 (Supabase CLI로 생성된 타입과 동일한 구조)
 interface Database {
-  Tables: {
-    users: {
-      Row: {
-        id: number;
-        name: string;
-        email: string;
-        status: string;
-        last_login: string | null;
-        created_at: string;
+  public: {
+    Tables: {
+      users: {
+        Row: {
+          id: number;
+          name: string;
+          email: string;
+          status: string;
+          last_login: string | null;
+          created_at: string;
+        };
+        Insert: {
+          name: string;
+          email: string;
+          status?: string;
+          last_login?: string | null;
+        };
+        Update: {
+          name?: string;
+          email?: string;
+          status?: string;
+          last_login?: string | null;
+        };
+        Relationships: unknown[];
       };
-      Insert: {
-        name: string;
-        email: string;
-        status?: string;
-        last_login?: string | null;
-      };
-      Update: {
-        name?: string;
-        email?: string;
-        status?: string;
-        last_login?: string | null;
-      };
-      Relationships: unknown[];
+      // 다른 테이블들...
     };
-    // 다른 테이블들...
+    Views: {
+      // 뷰 정의...
+    };
+    Functions: {
+      // 함수 정의...
+    };
+    Enums: {
+      // 열거형 정의...
+    };
   };
+  // 다른 스키마들...
 }
 ```
 
@@ -215,6 +229,11 @@ const { data, error } = await client
       content: '내용...'
     }
   ]);
+
+// 다른 스키마 사용
+const { data, error } = await client
+  .from('users', 'other_schema')
+  .select('*');
 ```
 
 ## API 문서
@@ -312,3 +331,7 @@ npm run build
 ## 라이선스
 
 MIT 라이선스로 배포됩니다. 자세한 내용은 [LICENSE](LICENSE) 파일을 참조하세요.
+
+## 저작권
+
+Copyright © 2025 Genideas Inc. and Wondong Shin (wodshin@gmail.com)

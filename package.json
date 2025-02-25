@@ -1,6 +1,6 @@
 {
   "name": "supalite",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A lightweight TypeScript PostgreSQL client with Supabase-style API",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -21,7 +21,11 @@
     "lightweight",
     "query-builder"
   ],
-  "author": "",
+  "author": {
+    "name": "Wondong Shin",
+    "email": "wodshin@gmail.com",
+    "organization": "Genideas Inc."
+  },
   "license": "MIT",
   "dependencies": {
     "cross-fetch": "^4.0.0",
