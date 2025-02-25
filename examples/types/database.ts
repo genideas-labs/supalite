@@ -1,7 +1,14 @@
-export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[];
 
 export interface Database {
-  Tables: {
+  public: {
+    Tables: {
       users: {
         Row: {
           id: number;
@@ -97,6 +104,28 @@ export interface Database {
           content?: string;
         };
         Relationships: [];
+      };
+    };
+    Views: {
+      [_ in never]: never;
+    };
+    Functions: {
+      [_ in never]: never;
+    };
+    Enums: {
+      [_ in never]: never;
+    };
+    CompositeTypes: {
+      [_ in never]: never;
+    };
+  };
+  [schema: string]: {
+    Tables: {
+      [key: string]: {
+        Row: any;
+        Insert: any;
+        Update: any;
+        Relationships: unknown[];
       };
     };
     Views: {

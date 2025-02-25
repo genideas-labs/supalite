@@ -1,5 +1,13 @@
 import { PostgresError } from './errors';
 
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[];
+
 export interface TableBase {
   Row: any;
   Insert: any;
@@ -7,19 +15,57 @@ export interface TableBase {
   Relationships: unknown[];
 }
 
-export interface DatabaseSchema {
-  Tables: {
-    [key: string]: TableBase;
-  };
+export interface SchemaDefinition {
+  Tables: { [key: string]: TableBase };
+  Views?: { [key: string]: any };
+  Functions?: { [key: string]: any };
+  Enums?: { [key: string]: any };
+  CompositeTypes?: { [key: string]: any };
 }
 
-export type TableName<T extends DatabaseSchema> = keyof T['Tables'];
-export type Row<T extends DatabaseSchema, K extends TableName<T>> = T['Tables'][K]['Row'];
-export type InsertRow<T extends DatabaseSchema, K extends TableName<T>> = T['Tables'][K]['Insert'];
-export type UpdateRow<T extends DatabaseSchema, K extends TableName<T>> = T['Tables'][K]['Update'] & {
+export interface DatabaseSchema {
+  [schema: string]: SchemaDefinition;
+}
+
+// Supabase 스타일 데이터베이스 타입을 DatabaseSchema로 변환
+export type AsDatabaseSchema<T> = {
+  [K in keyof T]: T[K] extends { Tables: any }
+    ? SchemaDefinition & T[K]
+    : never;
+};
+
+export type SchemaName<T extends DatabaseSchema> = keyof T;
+export type TableName<
+  T extends DatabaseSchema,
+  S extends SchemaName<T> = SchemaName<T>
+> = keyof T[S]['Tables'];
+
+export type Row<
+  T extends DatabaseSchema,
+  S extends SchemaName<T>,
+  K extends TableName<T, S>
+> = T[S]['Tables'][K]['Row'];
+
+export type InsertRow<
+  T extends DatabaseSchema,
+  S extends SchemaName<T>,
+  K extends TableName<T, S>
+> = T[S]['Tables'][K]['Insert'];
+
+export type UpdateRow<
+  T extends DatabaseSchema,
+  S extends SchemaName<T>,
+  K extends TableName<T, S>
+> = T[S]['Tables'][K]['Update'] & {
   modified_at?: string;
   updated_at?: string;
 };
+
+export type EnumType<
+  T extends DatabaseSchema,
+  S extends SchemaName<T>,
+  E extends keyof NonNullable<T[S]['Enums']>
+> = NonNullable<T[S]['Enums']>[E];
 
 export interface SupaliteConfig {
   user?: string;

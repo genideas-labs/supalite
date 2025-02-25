@@ -1,4 +1,4 @@
-import { SupaLitePG } from '../../dist';
+import { SupaLitePG } from '../../src';
 import { Database } from '../types/database';
 
 const client = new SupaLitePG<Database>({
@@ -80,7 +80,7 @@ async function testTransaction() {
         .from('users')
         .select('*')
         .eq('email', 'fail@example.com');
-      const users = checkUsers.data as Database['Tables']['users']['Row'][];
+      const users = checkUsers.data as Database['public']['Tables']['users']['Row'][];
       console.log('Rollback verified - no users found:', !users || users.length === 0);
     }
 

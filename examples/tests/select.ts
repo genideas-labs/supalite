@@ -1,4 +1,4 @@
-import { SupaLitePG } from '../../dist';
+import { SupaLitePG } from '../../src';
 import { Database } from '../types/database';
 
 const client = new SupaLitePG<Database>({
