@@ -1,16 +1,32 @@
 import { Pool } from 'pg';
 import { QueryBuilder } from './query-builder';
 import { PostgresError } from './errors';
-import { TableName, SupaliteConfig, Row, DatabaseSchema } from './types';
+import { TableName, SupaliteConfig, Row, DatabaseSchema, SchemaName, AsDatabaseSchema } from './types';
 import { config as dotenvConfig } from 'dotenv';
 
 // .env 파일 로드
 dotenvConfig();
 
-export class SupaLitePG<T extends DatabaseSchema> {
+type SchemaWithTables = {
+  Tables: {
+    [key: string]: {
+      Row: any;
+      Insert: any;
+      Update: any;
+      Relationships: unknown[];
+    };
+  };
+  Views?: any;
+  Functions?: any;
+  Enums?: any;
+  CompositeTypes?: any;
+};
+
+export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
   private pool: Pool;
   private client: any | null = null;
   private isTransaction: boolean = false;
+  private schema: string;
 
   constructor(config?: SupaliteConfig) {
     const poolConfig = {
@@ -21,6 +37,8 @@ export class SupaLitePG<T extends DatabaseSchema> {
       port: config?.port || Number(process.env.DB_PORT) || 5432,
       ssl: config?.ssl || process.env.DB_SSL === 'true',
     };
+
+    this.schema = config?.schema || 'public';
 
     // 디버그용 로그 (비밀번호는 제외)
     console.log('Database connection config:', {
@@ -81,8 +99,22 @@ export class SupaLitePG<T extends DatabaseSchema> {
     }
   }
 
-  from<K extends TableName<T>>(table: K): QueryBuilder<T, K> {
-    return new QueryBuilder<T, K>(this.pool, table);
+  from<K extends keyof T['public']['Tables']>(
+    table: K
+  ): QueryBuilder<T, 'public', K>;
+  from<S extends keyof T, K extends keyof T[S]['Tables']>(
+    table: K,
+    schema: S
+  ): QueryBuilder<T, S, K>;
+  from<S extends keyof T, K extends keyof T[S]['Tables']>(
+    table: K,
+    schema?: S
+  ): QueryBuilder<T, S, K> {
+    return new QueryBuilder<T, S, K>(
+      this.pool,
+      table,
+      schema || 'public' as S
+    );
   }
 
   async rpc(
@@ -103,8 +135,8 @@ export class SupaLitePG<T extends DatabaseSchema> {
         : '';
 
       const query = paramPlaceholders
-        ? `SELECT * FROM ${procedureName}(${paramPlaceholders})`
-        : `SELECT * FROM ${procedureName}()`;
+        ? `SELECT * FROM "${this.schema}"."${procedureName}"(${paramPlaceholders})`
+        : `SELECT * FROM "${this.schema}"."${procedureName}"()`;
 
       const result = await this.pool.query(query, paramValues);
 
