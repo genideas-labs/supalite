@@ -1,5 +1,7 @@
 # SupaLite
 
+[![npm version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://www.npmjs.com/package/supalite)
+
 가볍고 효율적인 PostgreSQL 클라이언트 라이브러리입니다. Supabase와 동일한 API를 제공하면서도 더 가볍고 빠른 구현을 제공합니다.
 
 ## 주요 기능
@@ -9,9 +11,10 @@
 - 🛠 CRUD 작업: 간단하고 명확한 데이터베이스 작업
 - 📦 RPC 지원: 저장 프로시저 호출 기능
 - ⚡ 성능 최적화: 커넥션 풀링 및 효율적인 쿼리 실행
-- 💪 트랜잭션 지원: 안전한 데이터베이스 트랜잭션 처리
+- 💪 트랜잭션 지원: Supabase에서 지원하지 않는 안전한 데이터베이스 트랜잭션 처리
 - 🎯 UPSERT 지원: 삽입/업데이트 동작 제어
 - 🔍 고급 필터링: OR 조건, ILIKE 검색 등 지원
+- 📚 배열 작업: 다중 레코드 삽입 및 배열 데이터 처리
 
 ## 설치 방법
 
@@ -19,104 +22,199 @@
 npm install supalite
 ```
 
+## 타입 시스템
+
+### 데이터베이스 스키마 정의
+
+```typescript
+// Supabase CLI의 타입 생성기로 생성된 데이터베이스 타입 정의
+// 예: supabase gen types typescript --local > database.types.ts
+import { Database } from './types/database';
+
+// 타입이 적용된 클라이언트 생성
+const client = new SupaLitePG<Database>({
+  user: 'testuser',
+  password: 'testpassword',
+  host: 'localhost',
+  database: 'testdb',
+  port: 5432,
+  ssl: false
+});
+
+// 또는 환경 변수 사용
+const client = new SupaLitePG<Database>();
+
+// Database 인터페이스 예시 (Supabase CLI로 생성된 타입과 동일한 구조)
+interface Database {
+  Tables: {
+    users: {
+      Row: {
+        id: number;
+        name: string;
+        email: string;
+        status: string;
+        last_login: string | null;
+        created_at: string;
+      };
+      Insert: {
+        name: string;
+        email: string;
+        status?: string;
+        last_login?: string | null;
+      };
+      Update: {
+        name?: string;
+        email?: string;
+        status?: string;
+        last_login?: string | null;
+      };
+      Relationships: unknown[];
+    };
+    // 다른 테이블들...
+  };
+}
+```
+
 ## 사용 예시
 
 ### 데이터베이스 연결
 
-#### 기존 pg 라이브러리 스타일
 ```typescript
 import { SupaLitePG } from 'supalite';
+import { Database } from './types/database';
 
-// 기존 pg 설정 방식과 동일
-const db = new SupaLitePG({
-  user: 'dbuser',
-  host: 'database.server.com',
-  database: 'mydb',
-  password: 'secretpassword',
+// 타입이 적용된 클라이언트 생성
+const client = new SupaLitePG<Database>({
+  user: 'testuser',
+  password: 'testpassword',
+  host: 'localhost',
+  database: 'testdb',
   port: 5432,
-  ssl: true
+  ssl: false
 });
-
-// 또는 환경 변수 사용 (자동으로 process.env 값을 사용)
-const db = new SupaLitePG();
-
-// 기존 pg 스타일 쿼리
-const result = await db.pool.query(
-  'SELECT * FROM users WHERE id = $1',
-  [1]
-);
-
-// 새로운 쿼리 빌더 사용
-const { data, error } = await db
-  .from('users')
-  .select('*')
-  .eq('id', 1)
-  .single();
 ```
 
-#### Supabase 스타일
+### 기본 CRUD 작업
 
 ```typescript
-import { supalitePg } from 'supalite';
-
 // 데이터 조회
-const { data, error } = await supalitePg
+const { data, error } = await client
   .from('users')
   .select('*')
   .eq('id', 1)
   .single();
 
-// 데이터 삽입
-const { data, error } = await supalitePg
+// 단일 레코드 삽입
+const { data, error } = await client
   .from('users')
   .insert({ 
     name: '홍길동', 
     email: 'hong@example.com' 
   });
 
-// RPC 호출
-const { data, error } = await supalitePg
-  .rpc('calculate_total', { x: 1, y: 2 });
+// 다중 레코드 삽입
+const { data, error } = await client
+  .from('users')
+  .insert([
+    { name: '홍길동', email: 'hong@example.com' },
+    { name: '김철수', email: 'kim@example.com' }
+  ]);
+
+// 특정 컬럼 선택
+const { data } = await client
+  .from('profiles')
+  .select('user_id, bio, interests')
+  .limit(2);
+
+// 다중 정렬
+const { data } = await client
+  .from('users')
+  .select('name, status, last_login')
+  .order('status', { ascending: true })
+  .order('last_login', { ascending: false });
+
+// 페이지네이션
+const page1 = await client
+  .from('posts')
+  .select('*')
+  .limit(2)
+  .offset(0);
+
+// Range 쿼리
+const { data } = await client
+  .from('comments')
+  .select('*')
+  .range(1, 3);
+
+// 조건부 UPDATE
+const { data } = await client
+  .from('posts')
+  .update({
+    views: 10,
+    updated_at: new Date().toISOString()
+  })
+  .eq('user_id', userId)
+  .select();
+
+// UPSERT
+const { data } = await client
+  .from('profiles')
+  .upsert({
+    user_id: userId,
+    bio: '새로운 프로필입니다.',
+    interests: ['코딩', '음악'],
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'id' })
+  .select()
+  .single();
 ```
 
 ### 고급 기능 사용 예시
 
 ```typescript
-// 트랜잭션 사용
-await supalitePg.transaction(async (client) => {
-  const { data: user } = await client
+// 트랜잭션 사용 (Supabase에서 지원하지 않는 기능)
+await client.transaction(async (tx) => {
+  const { data: user } = await tx
     .from('users')
     .insert({ name: '홍길동' })
     .select()
     .single();
 
-  await client
+  await tx
     .from('profiles')
     .insert({ user_id: user.id });
 });
 
-// UPSERT 작업
-const { data, error } = await supalitePg
-  .from('users')
-  .upsert(
-    { id: 1, name: '홍길동', updated_at: new Date().toISOString() },
-    { onConflict: 'id' }
-  );
-
 // OR 조건 필터링
-const { data, error } = await supalitePg
+const { data, error } = await client
   .from('users')
   .or('status.eq.active,role.eq.admin');
 
 // 대소문자 구분 없는 검색
-const { data, error } = await supalitePg
+const { data, error } = await client
   .from('users')
   .ilike('email', '%@example.com');
 
 // 정확한 카운트와 함께 조회
-const { data, count, error } = await supalitePg
+const { data, count, error } = await client
   .from('users')
   .select('*', { count: 'exact' });
+
+// 배열 데이터 처리
+const { data, error } = await client
+  .from('posts')
+  .insert([
+    {
+      title: '첫 번째 글',
+      tags: ['프로그래밍', '팁'],
+      content: '내용...'
+    },
+    {
+      title: '두 번째 글',
+      tags: ['여행'],
+      content: '내용...'
+    }
+  ]);
 ```
 
 ## API 문서
@@ -124,10 +222,10 @@ const { data, count, error } = await supalitePg
 ### 쿼리 메소드
 
 - `select(columns?: string, options?: { count?: 'exact' | 'planned' | 'estimated', head?: boolean })`: 조회할 컬럼 지정
-- `insert(data: object)`: 새 레코드 삽입
-- `update(data: object)`: 레코드 업데이트
+- `insert(data: T['Tables'][K]['Insert'] | T['Tables'][K]['Insert'][])`: 단일 또는 다중 레코드 삽입
+- `update(data: T['Tables'][K]['Update'])`: 레코드 업데이트
 - `delete()`: 레코드 삭제
-- `upsert(data: object, options?: { onConflict: string })`: 삽입 또는 업데이트
+- `upsert(data: T['Tables'][K]['Insert'], options?: { onConflict: string })`: 삽입 또는 업데이트
 
 ### 필터 메소드
 
