@@ -1,13 +1,13 @@
 import { Pool } from 'pg';
 import { QueryBuilder } from './query-builder';
 import { PostgresError } from './errors';
-import { TableName, SupaliteConfig, Row, SchemaBase, DefaultSchema } from './types';
+import { TableName, SupaliteConfig, Row, DatabaseSchema } from './types';
 import { config as dotenvConfig } from 'dotenv';
 
 // .env 파일 로드
 dotenvConfig();
 
-export class SupaLitePG<T extends SchemaBase = DefaultSchema> {
+export class SupaLitePG<T extends DatabaseSchema> {
   private pool: Pool;
   private client: any | null = null;
   private isTransaction: boolean = false;

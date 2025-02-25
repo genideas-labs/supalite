@@ -7,13 +7,10 @@ import {
   FilterOptions,
   QueryResult,
   SingleQueryResult,
-  Row,
-  InsertRow,
-  UpdateRow,
-  SchemaBase,
+  DatabaseSchema
 } from './types';
 
-export class QueryBuilder<T extends SchemaBase, K extends TableName<T>> implements Promise<QueryResult<T['Tables'][K]['Row']> | SingleQueryResult<T['Tables'][K]['Row']>> {
+export class QueryBuilder<T extends DatabaseSchema, K extends TableName<T>> implements Promise<QueryResult<T['Tables'][K]['Row']> | SingleQueryResult<T['Tables'][K]['Row']>> {
   readonly [Symbol.toStringTag] = 'QueryBuilder';
   private table: K;
   private selectColumns: string | null = null;
@@ -27,7 +24,7 @@ export class QueryBuilder<T extends SchemaBase, K extends TableName<T>> implemen
   private whereValues: any[] = [];
   private isSingleResult: boolean = false;
   private queryType: QueryType = 'SELECT';
-  private insertData?: T['Tables'][K]['Insert'];
+  private insertData?: T['Tables'][K]['Insert'] | T['Tables'][K]['Insert'][];
   private updateData?: T['Tables'][K]['Update'];
   private conflictTarget?: string;
 
@@ -244,6 +241,7 @@ export class QueryBuilder<T extends SchemaBase, K extends TableName<T>> implemen
   private buildQuery(): { query: string; values: any[] } {
     let query = '';
     let values: any[] = [];
+    let insertColumns: string[] = [];
     const returning = this.shouldReturnData() ? ` RETURNING ${this.selectColumns || '*'}` : '';
     
     switch (this.queryType) {
@@ -262,21 +260,36 @@ export class QueryBuilder<T extends SchemaBase, K extends TableName<T>> implemen
       case 'INSERT':
       case 'UPSERT':
         if (!this.insertData) throw new Error('No data provided for insert/upsert');
-        const insertData = this.insertData as Record<string, unknown>;
-        const insertColumns = Object.keys(insertData);
-        const insertValues = Object.values(insertData);
-        const insertPlaceholders = insertValues.map((_, i) => `$${i + 1}`).join(',');
-        query = `INSERT INTO "${String(this.table)}" ("${insertColumns.join('","')}") VALUES (${insertPlaceholders})`;
+        
+        if (Array.isArray(this.insertData)) {
+          // 여러 row 처리
+          const rows = this.insertData;
+          if (rows.length === 0) throw new Error('Empty array provided for insert');
+          
+          insertColumns = Object.keys(rows[0]);
+          values = rows.map(row => Object.values(row)).flat();
+          const placeholders = rows.map((_, i) => 
+            `(${insertColumns.map((_, j) => `$${i * insertColumns.length + j + 1}`).join(',')})`
+          ).join(',');
+          
+          query = `INSERT INTO "${String(this.table)}" ("${insertColumns.join('","')}") VALUES ${placeholders}`;
+        } else {
+          // 단일 row 처리
+          const insertData = this.insertData as Record<string, unknown>;
+          insertColumns = Object.keys(insertData);
+          values = Object.values(insertData);
+          const insertPlaceholders = values.map((_, i) => `$${i + 1}`).join(',');
+          query = `INSERT INTO "${String(this.table)}" ("${insertColumns.join('","')}") VALUES (${insertPlaceholders})`;
+        }
         
         if (this.queryType === 'UPSERT' && this.conflictTarget) {
           query += ` ON CONFLICT (${this.conflictTarget}) DO UPDATE SET `;
           query += insertColumns
-            .map((col) => `"${col}" = EXCLUDED."${col}"`)
+            .map((col: string) => `"${col}" = EXCLUDED."${col}"`)
             .join(', ');
         }
         
         query += returning;
-        values = [...insertValues];
         break;
 
       case 'UPDATE':
@@ -411,7 +424,7 @@ export class QueryBuilder<T extends SchemaBase, K extends TableName<T>> implemen
     }
   }
 
-  insert(data: T['Tables'][K]['Insert']): this {
+  insert(data: T['Tables'][K]['Insert'] | T['Tables'][K]['Insert'][]): this {
     this.queryType = 'INSERT';
     this.insertData = data;
     return this;
