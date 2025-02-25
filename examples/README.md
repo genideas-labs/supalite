@@ -1,99 +1,82 @@
-# SupaLite 예제
+# Supalite 예제
 
-## 테스트 환경 설정
+이 디렉토리에는 Supalite 라이브러리의 다양한 기능을 보여주는 예제들이 포함되어 있습니다.
 
-### PostgreSQL 설치 가이드
-[메인 README의 PostgreSQL 설치 가이드 참조](../README.md#postgresql-설치)
+## 설정
 
-### 테스트용 테이블 생성
-
-1. PostgreSQL에 접속:
-```sql
-psql -U testuser -d testdb
-```
-
-2. 테스트용 테이블 생성:
-```sql
-CREATE TABLE users (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE profiles (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES users(id),
-    bio TEXT,
-    avatar_url VARCHAR(255)
-);
-```
-
-3. 샘플 데이터 추가:
-```sql
-INSERT INTO users (name, email) VALUES
-    ('홍길동', 'hong@example.com'),
-    ('김철수', 'kim@example.com'),
-    ('이영희', 'lee@example.com');
-
-INSERT INTO profiles (user_id, bio) VALUES
-    (1, '안녕하세요! 홍길동입니다.'),
-    (2, '반갑습니다. 김철수입니다.'),
-    (3, '이영희입니다. 잘 부탁드려요.');
-```
-
-## 환경 변수 설정
-
-1. .env 파일 생성:
+1. 데이터베이스 설정:
 ```bash
-cat > .env << EOL
-DB_USER=testuser
-DB_HOST=localhost
-DB_NAME=testdb
-DB_PASS=testpassword
-DB_PORT=5432
-DB_SSL=false
-EOL
+# PostgreSQL에 접속하여 테스트 데이터베이스와 테이블 생성
+psql -U postgres
+CREATE DATABASE testdb;
+\c testdb
+\i setup.sql
+```
+
+2. 환경 변수 설정:
+```bash
+# .env.example 파일을 .env로 복사
+cp .env.example .env
+
+# .env 파일을 편집하여 데이터베이스 연결 정보 입력
+# DB_USER=postgres
+# DB_HOST=localhost
+# DB_NAME=testdb
+# DB_PASS=postgres
+# DB_PORT=5432
+# DB_SSL=false
 ```
 
 ## 예제 실행
 
+각 예제는 특정 기능을 테스트합니다:
+
+1. SELECT 쿼리 테스트:
 ```bash
-# TypeScript로 직접 실행
-npx ts-node examples/test.ts
-
-# 또는 빌드 후 실행
-npm run build
-node examples/test.js
+npx ts-node examples/tests/select.ts
 ```
+- 기본 SELECT
+- 특정 컬럼 선택
+- COUNT 쿼리
+- 정렬과 페이징
 
-## 예제 파일 설명
-
-### test.ts
-기본적인 데이터베이스 연결 및 쿼리 테스트를 보여주는 예제입니다.
-```typescript
-import { supalitePg } from '../dist';
-
-// 사용자 목록 조회
-const result = await supalitePg
-  .from('users')
-  .select('*')
-  .limit(5);
-
-console.log('Users:', result.data);
-
-// 특정 사용자의 프로필 조회
-const userProfile = await supalitePg
-  .from('profiles')
-  .select('*')
-  .eq('user_id', 1)
-  .single();
-
-console.log('Profile:', userProfile.data);
+2. WHERE 조건 테스트:
+```bash
+npx ts-node examples/tests/where.ts
 ```
+- eq, neq, is
+- in, contains (배열)
+- ilike (패턴 매칭)
+- gte/lte (날짜 범위)
+- OR 조건
 
-## 추가 예제 (준비 중)
-- 트랜잭션 사용 예제
-- UPSERT 작업 예제
-- 복잡한 조인 쿼리 예제
-- 실시간 구독 예제
+3. 데이터 변경 테스트:
+```bash
+npx ts-node examples/tests/mutation.ts
+```
+- INSERT (단일/다중)
+- UPDATE (조건부)
+- DELETE
+- UPSERT
+
+4. 트랜잭션 테스트:
+```bash
+npx ts-node examples/tests/transaction.ts
+```
+- 성공 케이스
+- 롤백 케이스
+- 중첩 트랜잭션
+
+5. 특수 케이스 테스트:
+```bash
+npx ts-node examples/tests/special.ts
+```
+- single() 메서드
+- 복잡한 조인 쿼리
+- 에러 처리
+- 서브쿼리
+- 집계 함수
+
+## 타입 시스템
+
+`examples/types/database.ts` 파일에는 테스트 데이터베이스의 타입 정의가 포함되어 있습니다. 이는 실제 프로젝트에서 Supabase의 타입 생성기를 사용하는 것과 유사한 방식으로 타입 안전성을 보여주기 위한 예시입니다.

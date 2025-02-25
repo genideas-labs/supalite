@@ -5,4 +5,4 @@ export * from './postgres-client';
 export * from './query-builder';
 
 // Re-export main client
-export { SupabaseClient as default } from './client';
+export { SupaLiteClient as default } from './client';

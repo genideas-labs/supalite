@@ -1,18 +1,18 @@
 import { Pool } from 'pg';
 import { QueryBuilder } from './query-builder';
 import { PostgresError } from './errors';
-import { TableName, PostgresConfig, Row } from './types';
+import { TableName, SupaliteConfig, Row, SchemaBase, DefaultSchema } from './types';
 import { config as dotenvConfig } from 'dotenv';
 
 // .env 파일 로드
 dotenvConfig();
 
-export class SupaLitePG {
+export class SupaLitePG<T extends SchemaBase = DefaultSchema> {
   private pool: Pool;
   private client: any | null = null;
   private isTransaction: boolean = false;
 
-  constructor(config?: PostgresConfig) {
+  constructor(config?: SupaliteConfig) {
     const poolConfig = {
       user: config?.user || process.env.DB_USER,
       host: config?.host || process.env.DB_HOST,
@@ -67,9 +67,9 @@ export class SupaLitePG {
   }
 
   // 트랜잭션 실행
-  async transaction<T>(
-    callback: (client: SupaLitePG) => Promise<T>
-  ): Promise<T> {
+  async transaction<R>(
+    callback: (client: SupaLitePG<T>) => Promise<R>
+  ): Promise<R> {
     await this.begin();
     try {
       const result = await callback(this);
@@ -81,8 +81,8 @@ export class SupaLitePG {
     }
   }
 
-  from<T extends TableName>(table: T): QueryBuilder<T, Row<T>> {
-    return new QueryBuilder<T, Row<T>>(this.pool, table);
+  from<K extends TableName<T>>(table: K): QueryBuilder<T, K> {
+    return new QueryBuilder<T, K>(this.pool, table);
   }
 
   async rpc(

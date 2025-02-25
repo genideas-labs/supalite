@@ -1,23 +1,22 @@
-import { SupabaseConfig, QueryOptions, FilterOptions } from './types';
+import { SupaliteConfig, QueryOptions, FilterOptions, SchemaBase, DefaultSchema } from './types';
 import { SupaLitePG } from './postgres-client';
 import { TableName } from './types';
 
-export class SupabaseClient {
-  private postgresClient: SupaLitePG;
+export class SupaLiteClient<T extends SchemaBase = DefaultSchema> {
+  private postgresClient: SupaLitePG<T>;
 
-  constructor(private config: SupabaseConfig) {
-    this.postgresClient = new SupaLitePG({
-      host: new URL(config.supabaseUrl).hostname,
-      database: 'postgres',
-      user: 'postgres',
-      password: config.supabaseKey,
-      port: 5432,
-      ssl: true,
+  constructor(private config: SupaliteConfig) {
+    this.postgresClient = new SupaLitePG<T>({      
+      database: config.database || 'postgres',
+      user: config.user || 'postgres',
+      password: config.password || 'postgres',
+      port: config.port || 5432,
+      ssl: config.ssl || false,
     });
   }
 
-  from<T extends TableName>(table: T) {
-    return this.postgresClient.from<T>(table);
+  from<K extends TableName<T>>(table: K) {
+    return this.postgresClient.from<K>(table);
   }
 
   async rpc(procedureName: string, params: Record<string, any> = {}) {

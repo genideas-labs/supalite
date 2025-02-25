@@ -10,11 +10,12 @@ import {
   Row,
   InsertRow,
   UpdateRow,
+  SchemaBase,
 } from './types';
 
-export class QueryBuilder<T extends TableName, R = Row<T>> implements Promise<QueryResult<R> | SingleQueryResult<R>> {
+export class QueryBuilder<T extends SchemaBase, K extends TableName<T>> implements Promise<QueryResult<T['Tables'][K]['Row']> | SingleQueryResult<T['Tables'][K]['Row']>> {
   readonly [Symbol.toStringTag] = 'QueryBuilder';
-  private table: T;
+  private table: K;
   private selectColumns: string | null = null;
   private whereConditions: string[] = [];
   private orConditions: string[][] = [];  // OR 조건을 위한 배열 추가
@@ -26,16 +27,16 @@ export class QueryBuilder<T extends TableName, R = Row<T>> implements Promise<Qu
   private whereValues: any[] = [];
   private isSingleResult: boolean = false;
   private queryType: QueryType = 'SELECT';
-  private insertData?: InsertRow<T>;
-  private updateData?: UpdateRow<T>;
+  private insertData?: T['Tables'][K]['Insert'];
+  private updateData?: T['Tables'][K]['Update'];
   private conflictTarget?: string;
 
-  constructor(private pool: Pool, table: T) {
+  constructor(private pool: Pool, table: K) {
     this.table = table;
   }
 
-  then<TResult1 = QueryResult<R> | SingleQueryResult<R>, TResult2 = never>(
-    onfulfilled?: ((value: QueryResult<R> | SingleQueryResult<R>) => TResult1 | PromiseLike<TResult1>) | null,
+  then<TResult1 = QueryResult<T['Tables'][K]['Row']> | SingleQueryResult<T['Tables'][K]['Row']>, TResult2 = never>(
+    onfulfilled?: ((value: QueryResult<T['Tables'][K]['Row']> | SingleQueryResult<T['Tables'][K]['Row']>) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
   ): Promise<TResult1 | TResult2> {
     return this.execute().then(onfulfilled, onrejected);
@@ -43,11 +44,11 @@ export class QueryBuilder<T extends TableName, R = Row<T>> implements Promise<Qu
 
   catch<TResult = never>(
     onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null
-  ): Promise<QueryResult<R> | SingleQueryResult<R> | TResult> {
+  ): Promise<QueryResult<T['Tables'][K]['Row']> | SingleQueryResult<T['Tables'][K]['Row']> | TResult> {
     return this.execute().catch(onrejected);
   }
 
-  finally(onfinally?: (() => void) | null): Promise<QueryResult<R> | SingleQueryResult<R>> {
+  finally(onfinally?: (() => void) | null): Promise<QueryResult<T['Tables'][K]['Row']> | SingleQueryResult<T['Tables'][K]['Row']>> {
     return this.execute().finally(onfinally);
   }
 
@@ -130,9 +131,9 @@ export class QueryBuilder<T extends TableName, R = Row<T>> implements Promise<Qu
     return this;
   }
 
-  single(): Promise<SingleQueryResult<R>> {
+  single(): Promise<SingleQueryResult<T['Tables'][K]['Row']>> {
     this.isSingleResult = true;
-    return this.execute() as Promise<SingleQueryResult<R>>;
+    return this.execute() as Promise<SingleQueryResult<T['Tables'][K]['Row']>>;
   }
 
   ilike(column: string, pattern: string): this {
@@ -193,8 +194,8 @@ export class QueryBuilder<T extends TableName, R = Row<T>> implements Promise<Qu
     return this;
   }
 
-  returns<NewR>(): QueryBuilder<T, NewR> {
-    return this as unknown as QueryBuilder<T, NewR>;
+  returns<NewK extends TableName<T>>(): QueryBuilder<T, NewK> {
+    return this as unknown as QueryBuilder<T, NewK>;
   }
 
   range(from: number, to: number): this {
@@ -204,7 +205,7 @@ export class QueryBuilder<T extends TableName, R = Row<T>> implements Promise<Qu
   }
 
   upsert(
-    values: InsertRow<T>,
+    values: T['Tables'][K]['Insert'],
     options?: { onConflict: string }
   ): this {
     this.queryType = 'UPSERT';
@@ -217,28 +218,40 @@ export class QueryBuilder<T extends TableName, R = Row<T>> implements Promise<Qu
     return this.selectColumns !== null;
   }
 
+  private buildWhereClause(updateValues?: any[]): string {
+    if (this.whereConditions.length === 0) {
+      return '';
+    }
+
+    const conditions = [...this.whereConditions];
+    if (this.orConditions.length > 0) {
+      conditions.push(
+        this.orConditions.map(group => `(${group.join(' OR ')})`).join(' AND ')
+      );
+    }
+
+    // UPDATE 쿼리의 경우 파라미터 인덱스 조정
+    if (updateValues) {
+      return ' WHERE ' + conditions
+        .map(cond => cond.replace(/\$(\d+)/g, (match, num) => 
+          `$${parseInt(num) + updateValues.length}`))
+        .join(' AND ');
+    }
+
+    return ' WHERE ' + conditions.join(' AND ');
+  }
+
   private buildQuery(): { query: string; values: any[] } {
     let query = '';
     let values: any[] = [];
     const returning = this.shouldReturnData() ? ` RETURNING ${this.selectColumns || '*'}` : '';
     
-    // OR 조건 처리를 위한 함수
-    const buildWhereClause = () => {
-      const conditions = [...this.whereConditions];
-      if (this.orConditions.length > 0) {
-        conditions.push(
-          this.orConditions.map(group => `(${group.join(' OR ')})`).join(' AND ')
-        );
-      }
-      return conditions.join(' AND ');
-    };
-    
     switch (this.queryType) {
       case 'SELECT':
         if (this.headOption) {
-          query = `SELECT COUNT(*) FROM "${this.table}"`;
+          query = `SELECT COUNT(*) FROM "${String(this.table)}"`;
         } else {
-          query = `SELECT ${this.selectColumns || '*'} FROM "${this.table}"`;
+          query = `SELECT ${this.selectColumns || '*'} FROM "${String(this.table)}"`;
           if (this.countOption === 'exact') {
             query = `SELECT *, COUNT(*) OVER() as exact_count FROM (${query}) subquery`;
           }
@@ -249,10 +262,11 @@ export class QueryBuilder<T extends TableName, R = Row<T>> implements Promise<Qu
       case 'INSERT':
       case 'UPSERT':
         if (!this.insertData) throw new Error('No data provided for insert/upsert');
-        const insertColumns = Object.keys(this.insertData);
-        const insertValues = Object.values(this.insertData);
+        const insertData = this.insertData as Record<string, unknown>;
+        const insertColumns = Object.keys(insertData);
+        const insertValues = Object.values(insertData);
         const insertPlaceholders = insertValues.map((_, i) => `$${i + 1}`).join(',');
-        query = `INSERT INTO "${this.table}" ("${insertColumns.join('","')}") VALUES (${insertPlaceholders})`;
+        query = `INSERT INTO "${String(this.table)}" ("${insertColumns.join('","')}") VALUES (${insertPlaceholders})`;
         
         if (this.queryType === 'UPSERT' && this.conflictTarget) {
           query += ` ON CONFLICT (${this.conflictTarget}) DO UPDATE SET `;
@@ -267,43 +281,36 @@ export class QueryBuilder<T extends TableName, R = Row<T>> implements Promise<Qu
 
       case 'UPDATE':
         if (!this.updateData) throw new Error('No data provided for update');
-        const updateData = { ...this.updateData };
+        const updateData = { ...this.updateData } as Record<string, unknown>;
 
+        const now = new Date().toISOString();
         if ('modified_at' in updateData && !updateData.modified_at) {
-          updateData.modified_at = new Date().toISOString();
+          updateData.modified_at = now;
         }
         if ('updated_at' in updateData && !updateData.updated_at) {
-          updateData.updated_at = new Date().toISOString();
+          updateData.updated_at = now;
         }
 
         const updateValues = Object.values(updateData);
         const setColumns = Object.keys(updateData).map(
-          (key, index) => `"${key}" = $${index + 1}`
+          (key, index) => `"${String(key)}" = $${index + 1}`
         );
-        query = `UPDATE "${this.table}" SET ${setColumns.join(', ')}`;
+        query = `UPDATE "${String(this.table)}" SET ${setColumns.join(', ')}`;
         values = [...updateValues, ...this.whereValues];
-
-        if (this.whereConditions.length > 0) {
-          query += ` WHERE ${this.whereConditions
-            .map(cond => cond.replace(/\$(\d+)/g, (match, num) => `$${parseInt(num) + updateValues.length}`))
-            .join(' AND ')}`;
-        }
+        query += this.buildWhereClause(updateValues);
         query += returning;
         break;
 
       case 'DELETE':
-        query = `DELETE FROM "${this.table}"`;
+        query = `DELETE FROM "${String(this.table)}"`;
         values = [...this.whereValues];
-
-        if (this.whereConditions.length > 0) {
-          query += ` WHERE ${this.whereConditions.join(' AND ')}`;
-        }
+        query += this.buildWhereClause();
         query += returning;
         break;
     }
 
-    if (this.whereConditions.length > 0 && this.queryType !== 'UPDATE') {
-      query += ` WHERE ${this.whereConditions.join(' AND ')}`;
+    if (this.queryType === 'SELECT') {
+      query += this.buildWhereClause();
     }
 
     if (this.orderByColumns.length > 0 && this.queryType === 'SELECT') {
@@ -321,7 +328,7 @@ export class QueryBuilder<T extends TableName, R = Row<T>> implements Promise<Qu
     return { query, values };
   }
 
-  async execute(): Promise<QueryResult<R> | SingleQueryResult<R>> {
+  async execute(): Promise<QueryResult<T['Tables'][K]['Row']> | SingleQueryResult<T['Tables'][K]['Row']>> {
     try {
       const { query, values } = this.buildQuery();
       const result = await this.pool.query(query, values);
@@ -333,7 +340,7 @@ export class QueryBuilder<T extends TableName, R = Row<T>> implements Promise<Qu
           count: result.rowCount,
           status: 200,
           statusText: 'OK',
-        } as QueryResult<R>;
+        } as QueryResult<T['Tables'][K]['Row']>;
       }
 
       if (this.queryType === 'UPDATE' && !this.shouldReturnData()) {
@@ -343,7 +350,7 @@ export class QueryBuilder<T extends TableName, R = Row<T>> implements Promise<Qu
           count: result.rowCount,
           status: 200,
           statusText: 'OK',
-        } as QueryResult<R>;
+        } as QueryResult<T['Tables'][K]['Row']>;
       }
 
       if (this.queryType === 'INSERT' && !this.shouldReturnData()) {
@@ -383,7 +390,7 @@ export class QueryBuilder<T extends TableName, R = Row<T>> implements Promise<Qu
           count: 1,
           status: 200,
           statusText: 'OK',
-        } as SingleQueryResult<R>;
+        } as SingleQueryResult<T['Tables'][K]['Row']>;
       }
 
       return {
@@ -392,7 +399,7 @@ export class QueryBuilder<T extends TableName, R = Row<T>> implements Promise<Qu
         count: result.rowCount,
         status: 200,
         statusText: 'OK',
-      } as QueryResult<R>;
+      } as QueryResult<T['Tables'][K]['Row']>;
     } catch (err: any) {
       return {
         data: null,
@@ -404,13 +411,13 @@ export class QueryBuilder<T extends TableName, R = Row<T>> implements Promise<Qu
     }
   }
 
-  insert(data: InsertRow<T>): this {
+  insert(data: T['Tables'][K]['Insert']): this {
     this.queryType = 'INSERT';
     this.insertData = data;
     return this;
   }
 
-  update(data: UpdateRow<T>): this {
+  update(data: T['Tables'][K]['Update']): this {
     this.queryType = 'UPDATE';
     this.updateData = data;
     return this;
