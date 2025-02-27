@@ -5,6 +5,7 @@
 ### Added
 - PostgreSQL bigint 타입 지원 추가 (JavaScript BigInt 타입으로 변환)
 - bigint 타입 테스트 코드 작성
+- Number 및 string 타입 값의 자동 변환 지원 확인 (bigint 컬럼에 Number나 string 값 전달 시 자동 변환)
 
 ## [0.1.2] - 2025-02-27
 

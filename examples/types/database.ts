@@ -18,14 +18,14 @@ export interface Database {
         };
         Insert: {
           id?: number;
-          small_int: bigint;
-          large_int: bigint;
+          small_int: bigint | number | string;
+          large_int: bigint | number | string;
           created_at?: string;
         };
         Update: {
           id?: number;
-          small_int?: bigint;
-          large_int?: bigint;
+          small_int?: bigint | number | string;
+          large_int?: bigint | number | string;
           created_at?: string;
         };
         Relationships: [];

@@ -310,6 +310,182 @@ async function testQueryBuilder() {
   }
 }
 
+// Number 타입 값을 bigint 컬럼에 삽입하는 테스트
+async function testNumberToBigint() {
+  console.log('\n7. Number 타입 값을 bigint 컬럼에 삽입하는 테스트:');
+  
+  try {
+    // Number 타입 값 삽입
+    const insertResult = await pool.query(
+      'INSERT INTO bigint_test (small_int, large_int) VALUES ($1, $2) RETURNING *',
+      [123456, 9007199254740991] // Number.MAX_SAFE_INTEGER
+    );
+    
+    console.log('Number 타입으로 삽입된 행:', insertResult.rows[0]);
+    
+    // 삽입된 값 확인
+    const checkResult = await pool.query(
+      'SELECT * FROM bigint_test WHERE id = $1',
+      [insertResult.rows[0].id]
+    );
+    
+    const insertedRow = checkResult.rows[0];
+    console.log('확인된 행:', insertedRow);
+    
+    if (typeof insertedRow.large_int === 'bigint') {
+      console.log('✅ 성공: Number 타입 값이 BigInt로 변환되어 반환됨');
+      console.log(`large_int 값: ${insertedRow.large_int}, 타입: ${typeof insertedRow.large_int}`);
+    } else {
+      console.log(`❌ 실패: large_int 타입이 ${typeof insertedRow.large_int}`);
+    }
+  } catch (err) {
+    console.error('Number 타입 삽입 중 오류:', err);
+  }
+}
+
+// String 타입 값을 bigint 컬럼에 삽입하는 테스트
+async function testStringToBigint() {
+  console.log('\n8. String 타입 값을 bigint 컬럼에 삽입하는 테스트:');
+  
+  try {
+    // String 타입 값 삽입
+    const insertResult = await pool.query(
+      'INSERT INTO bigint_test (small_int, large_int) VALUES ($1, $2) RETURNING *',
+      ["987654", "9223372036854775806"] // PostgreSQL bigint 최대값에 가까운 값
+    );
+    
+    console.log('String 타입으로 삽입된 행:', insertResult.rows[0]);
+    
+    // 삽입된 값 확인
+    const checkResult = await pool.query(
+      'SELECT * FROM bigint_test WHERE id = $1',
+      [insertResult.rows[0].id]
+    );
+    
+    const insertedRow = checkResult.rows[0];
+    console.log('확인된 행:', insertedRow);
+    
+    if (typeof insertedRow.large_int === 'bigint') {
+      console.log('✅ 성공: String 타입 값이 BigInt로 변환되어 반환됨');
+      console.log(`large_int 값: ${insertedRow.large_int}, 타입: ${typeof insertedRow.large_int}`);
+      
+      // 원래 값과 비교
+      if (insertedRow.large_int === BigInt("9223372036854775806")) {
+        console.log('✅ 성공: 값이 정확히 유지됨');
+      } else {
+        console.log(`❌ 실패: 값이 변경됨 - 예상: 9223372036854775806, 실제: ${insertedRow.large_int}`);
+      }
+    } else {
+      console.log(`❌ 실패: large_int 타입이 ${typeof insertedRow.large_int}`);
+    }
+  } catch (err) {
+    console.error('String 타입 삽입 중 오류:', err);
+  }
+}
+
+// client.insert()로 Number 타입 값을 bigint 컬럼에 삽입하는 테스트
+async function testClientInsertWithNumber() {
+  console.log('\n9. client.insert()로 Number 타입 값을 bigint 컬럼에 삽입하는 테스트:');
+  
+  try {
+    // client.insert() 함수를 사용하여 Number 타입 값 삽입
+    // 타입 정의가 bigint | number | string으로 업데이트되어 타입 캐스팅 불필요
+    const insertResult = await client
+      .from('bigint_test')
+      .insert({
+        small_int: 654321,
+        large_int: 9007199254740990 // Number.MAX_SAFE_INTEGER - 1
+      });
+    
+    if (insertResult.error) {
+      console.error('삽입 중 오류:', insertResult.error);
+      return;
+    }
+    
+    console.log('삽입 결과:', insertResult);
+    
+    // 삽입된 데이터 조회
+    const selectResult = await client
+      .from('bigint_test')
+      .select('*')
+      .eq('small_int', 654321)
+      .single();
+    
+    if (selectResult.error) {
+      console.error('조회 중 오류:', selectResult.error);
+      return;
+    }
+    
+    console.log('조회된 행:', selectResult.data);
+    
+    if (selectResult.data && typeof selectResult.data.large_int === 'bigint') {
+      console.log('✅ 성공: Number 타입 값이 BigInt로 변환되어 반환됨');
+      console.log(`large_int 값: ${selectResult.data.large_int}, 타입: ${typeof selectResult.data.large_int}`);
+    } else if (selectResult.data) {
+      console.log(`❌ 실패: large_int 타입이 ${typeof selectResult.data.large_int}`);
+    } else {
+      console.log('❌ 실패: 데이터를 찾을 수 없음');
+    }
+  } catch (err) {
+    console.error('client.insert() 테스트 중 오류:', err);
+  }
+}
+
+// client.insert()로 String 타입 값을 bigint 컬럼에 삽입하는 테스트
+async function testClientInsertWithString() {
+  console.log('\n10. client.insert()로 String 타입 값을 bigint 컬럼에 삽입하는 테스트:');
+  
+  try {
+    // client.insert() 함수를 사용하여 String 타입 값 삽입
+    // 타입 정의가 bigint | number | string으로 업데이트되어 타입 캐스팅 불필요
+    const insertResult = await client
+      .from('bigint_test')
+      .insert({
+        small_int: "112233",
+        large_int: "9223372036854775805" // PostgreSQL bigint 최대값에 가까운 값
+      });
+    
+    if (insertResult.error) {
+      console.error('삽입 중 오류:', insertResult.error);
+      return;
+    }
+    
+    console.log('삽입 결과:', insertResult);
+    
+    // 삽입된 데이터 조회
+    const selectResult = await client
+      .from('bigint_test')
+      .select('*')
+      .eq('small_int', BigInt("112233"))
+      .single();
+    
+    if (selectResult.error) {
+      console.error('조회 중 오류:', selectResult.error);
+      return;
+    }
+    
+    console.log('조회된 행:', selectResult.data);
+    
+    if (selectResult.data && typeof selectResult.data.large_int === 'bigint') {
+      console.log('✅ 성공: String 타입 값이 BigInt로 변환되어 반환됨');
+      console.log(`large_int 값: ${selectResult.data.large_int}, 타입: ${typeof selectResult.data.large_int}`);
+      
+      // 원래 값과 비교
+      if (selectResult.data.large_int === BigInt("9223372036854775805")) {
+        console.log('✅ 성공: 값이 정확히 유지됨');
+      } else {
+        console.log(`❌ 실패: 값이 변경됨 - 예상: 9223372036854775805, 실제: ${selectResult.data.large_int}`);
+      }
+    } else if (selectResult.data) {
+      console.log(`❌ 실패: large_int 타입이 ${typeof selectResult.data.large_int}`);
+    } else {
+      console.log('❌ 실패: 데이터를 찾을 수 없음');
+    }
+  } catch (err) {
+    console.error('client.insert() 테스트 중 오류:', err);
+  }
+}
+
 // 모든 테스트 실행
 async function runAllTests() {
   console.log('=== bigint 지원 테스트 시작 ===');
@@ -322,6 +498,10 @@ async function runAllTests() {
     await testClientInsert();
     await testClientUpdate();
     await testQueryBuilder();
+    await testNumberToBigint();
+    await testStringToBigint();
+    await testClientInsertWithNumber();
+    await testClientInsertWithString();
   } catch (err) {
     console.error('테스트 중 오류 발생:', err);
   } finally {
