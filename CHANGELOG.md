@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.3] - 2025-02-27
+
+### Added
+- PostgreSQL bigint 타입 지원 추가 (JavaScript BigInt 타입으로 변환)
+- bigint 타입 테스트 코드 작성
+
 ## [0.1.2] - 2025-02-27
 
 ### Added

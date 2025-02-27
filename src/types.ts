@@ -3,6 +3,7 @@ import { PostgresError } from './errors';
 export type Json =
   | string
   | number
+  | bigint  // BigInt 타입 추가
   | boolean
   | null
   | { [key: string]: Json | undefined }

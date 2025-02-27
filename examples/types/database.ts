@@ -9,6 +9,27 @@ export type Json =
 export interface Database {
   public: {
     Tables: {
+      bigint_test: {
+        Row: {
+          id: number;
+          small_int: bigint;
+          large_int: bigint;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          small_int: bigint;
+          large_int: bigint;
+          created_at?: string;
+        };
+        Update: {
+          id?: number;
+          small_int?: bigint;
+          large_int?: bigint;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       users: {
         Row: {
           id: number;

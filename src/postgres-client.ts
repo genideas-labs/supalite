@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Pool, types } from 'pg';
 import { QueryBuilder } from './query-builder';
 import { PostgresError } from './errors';
 import { TableName, SupaliteConfig, Row, DatabaseSchema, SchemaName, AsDatabaseSchema } from './types';
@@ -6,6 +6,11 @@ import { config as dotenvConfig } from 'dotenv';
 
 // .env 파일 로드
 dotenvConfig();
+
+// bigint 타입(OID: 20)을 JavaScript의 BigInt로 변환하는 파서 등록
+types.setTypeParser(20, function(val) {
+  return val === null ? null : BigInt(val);
+});
 
 type SchemaWithTables = {
   Tables: {
