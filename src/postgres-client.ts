@@ -29,6 +29,41 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
   private schema: string;
 
   constructor(config?: SupaliteConfig) {
+    // connectionString이 제공되면 이를 우선 사용
+    if (config?.connectionString || process.env.DB_CONNECTION) {
+      try {
+        const connectionString = config?.connectionString || process.env.DB_CONNECTION || '';
+        
+        // 간단한 유효성 검사 (postgresql:// 로 시작하는지)
+        if (!connectionString.startsWith('postgresql://')) {
+          throw new Error('Invalid PostgreSQL connection string format. Must start with postgresql://');
+        }
+        
+        this.pool = new Pool({ 
+          connectionString,
+          ssl: config?.ssl !== undefined ? config.ssl : process.env.DB_SSL === 'true'
+        });
+        
+        // 스키마 설정
+        this.schema = config?.schema || 'public';
+        
+        // 디버그용 로그
+        console.log('Database connection using connection string');
+        
+        // Error handling
+        this.pool.on('error', (err) => {
+          console.error('Unexpected error on idle client', err);
+          process.exit(-1);
+        });
+        
+        return;
+      } catch (err: any) {
+        console.error('Database connection error:', err.message);
+        throw new Error(`Failed to establish database connection: ${err.message}`);
+      }
+    }
+    
+    // 기존 코드: 개별 매개변수 사용
     const poolConfig = {
       user: config?.user || process.env.DB_USER,
       host: config?.host || process.env.DB_HOST,
@@ -166,6 +201,18 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
         status: 500,
         statusText: 'Internal Server Error'
       };
+    }
+  }
+
+  // 연결 테스트 메서드
+  async testConnection(): Promise<boolean> {
+    try {
+      const client = await this.pool.connect();
+      client.release();
+      return true;
+    } catch (err: any) {
+      console.error('Connection test failed:', err.message);
+      return false;
     }
   }
 

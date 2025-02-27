@@ -68,6 +68,7 @@ export type EnumType<
 > = NonNullable<T[S]['Enums']>[E];
 
 export interface SupaliteConfig {
+  connectionString?: string; // 연결 문자열(URI) 지원
   user?: string;
   host?: string;
   database?: string;
