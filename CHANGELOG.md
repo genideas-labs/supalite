@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6] - 2025-03-01
+
+### Added
+- corepack 지원 추가 (npm, yarn, pnpm, bun 패키지 관리자 지원)
+- 패키지 관리자 중립적인 스크립트 설정 ($npm_execpath 사용)
+- 각 패키지 관리자의 lock 파일 생성 (package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lockb)
+
 ## [0.1.5] - 2025-02-28
 
 ### Security

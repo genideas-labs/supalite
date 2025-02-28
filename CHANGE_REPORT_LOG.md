@@ -1,5 +1,79 @@
 # 변경 작업 보고서
 
+## [2025-03-01] corepack을 통한 다중 패키지 관리자 지원 추가
+
+### 작업 내용
+
+1. **corepack 설정 추가**:
+   - package.json에 packageManager 필드를 추가하여 기본 패키지 관리자와 버전을 지정했습니다.
+   - engines 필드를 추가하여 지원하는 Node.js 버전을 명시했습니다.
+   - corepack enable 명령어를 실행하여 corepack을 활성화했습니다.
+
+2. **패키지 관리자 중립적인 스크립트 설정**:
+   - prepare, prepublishOnly 등의 스크립트에서 npm 명령어를 $npm_execpath로 대체하여 패키지 관리자에 중립적인 방식으로 변경했습니다.
+   - 이를 통해 어떤 패키지 관리자를 사용하더라도 동일한 스크립트가 작동하도록 했습니다.
+
+3. **각 패키지 관리자의 lock 파일 생성**:
+   - npm: package-lock.json (기존 파일 유지)
+   - yarn: yarn.lock 생성
+   - pnpm: pnpm-lock.yaml 생성
+   - bun: bun.lockb 생성
+   - 각 패키지 관리자로 설치 및 빌드 테스트를 수행하여 정상 작동을 확인했습니다.
+
+4. **문서화**:
+   - CHANGELOG.md 파일을 업데이트하여 corepack 지원 추가 내용을 문서화했습니다.
+   - 버전을 0.1.6으로 업데이트했습니다.
+
+### 변경된 파일
+
+1. `package.json`: packageManager 필드 추가, engines 필드 추가, 스크립트 수정, 버전 업데이트
+2. `yarn.lock`: yarn 패키지 관리자 설정 파일 생성
+3. `pnpm-lock.yaml`: pnpm 패키지 관리자 설정 파일 생성
+4. `bun.lockb`: bun 패키지 관리자 설정 파일 생성
+5. `CHANGELOG.md`: 변경 사항 문서화 및 버전 업데이트
+6. `CHANGE_REPORT_LOG.md`: 변경 작업 보고서 추가
+
+### 개발 과정
+
+1. feature/corepack-support 브랜치 생성
+2. package.json 파일에 packageManager 및 engines 필드 추가
+3. 스크립트를 패키지 관리자에 중립적인 방식으로 수정
+4. corepack 활성화
+5. 각 패키지 관리자로 설치 및 빌드 테스트
+6. 문서화 및 버전 업데이트
+7. 변경 사항 커밋
+8. main 브랜치로 병합
+
+### 테스트 결과
+
+각 패키지 관리자로 설치 및 빌드 테스트를 수행했습니다:
+
+1. npm:
+   - `npm install` 실행
+   - `npm run build` 실행
+   - 모든 기능이 정상 작동함을 확인
+
+2. yarn:
+   - `yarn` 실행
+   - `yarn build` 실행
+   - 모든 기능이 정상 작동함을 확인
+
+3. pnpm:
+   - `pnpm install` 실행
+   - `pnpm build` 실행
+   - 모든 기능이 정상 작동함을 확인
+
+4. bun:
+   - `bun install` 실행
+   - `bun run build` 실행
+   - 모든 기능이 정상 작동함을 확인
+
+모든 테스트가 성공적으로 완료되었습니다.
+
+### 결론
+
+이번 작업을 통해 Supalite 라이브러리가 corepack을 통해 npm, yarn, pnpm, bun 패키지 관리자를 모두 지원할 수 있게 되었습니다. 사용자는 자신이 선호하는 패키지 관리자를 사용하여 라이브러리를 설치하고 사용할 수 있으며, 프로젝트 내에서는 package.json의 packageManager 필드에 지정된 패키지 관리자가 자동으로 사용됩니다.
+
 ## [2025-02-28] 예제 코드에서 민감한 정보 제거 및 Git 히스토리 정리
 
 ### 작업 내용
