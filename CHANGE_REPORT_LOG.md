@@ -17,10 +17,15 @@
    - npm: package-lock.json (기존 파일 유지)
    - yarn: yarn.lock 생성
    - pnpm: pnpm-lock.yaml 생성
-   - bun: bun.lockb 생성
+   - bun: bun.lock 생성
    - 각 패키지 관리자로 설치 및 빌드 테스트를 수행하여 정상 작동을 확인했습니다.
 
-4. **문서화**:
+4. **npm 배포 패키지 최적화**:
+   - .npmignore 파일을 추가하여 lock 파일들이 npm 배포 패키지에 포함되지 않도록 설정했습니다.
+   - 이를 통해 패키지 사용자가 자신의 프로젝트에 맞는 의존성 버전을 결정할 수 있도록 했습니다.
+   - 소스 파일, 테스트 파일 등 불필요한 파일도 npm 배포 패키지에서 제외하여 패키지 크기를 최적화했습니다.
+
+5. **문서화**:
    - CHANGELOG.md 파일을 업데이트하여 corepack 지원 추가 내용을 문서화했습니다.
    - 버전을 0.1.6으로 업데이트했습니다.
 
@@ -29,9 +34,10 @@
 1. `package.json`: packageManager 필드 추가, engines 필드 추가, 스크립트 수정, 버전 업데이트
 2. `yarn.lock`: yarn 패키지 관리자 설정 파일 생성
 3. `pnpm-lock.yaml`: pnpm 패키지 관리자 설정 파일 생성
-4. `bun.lockb`: bun 패키지 관리자 설정 파일 생성
-5. `CHANGELOG.md`: 변경 사항 문서화 및 버전 업데이트
-6. `CHANGE_REPORT_LOG.md`: 변경 작업 보고서 추가
+4. `bun.lock`: bun 패키지 관리자 설정 파일 생성
+5. `.npmignore`: npm 배포 패키지에서 제외할 파일 목록 설정
+6. `CHANGELOG.md`: 변경 사항 문서화 및 버전 업데이트
+7. `CHANGE_REPORT_LOG.md`: 변경 작업 보고서 추가
 
 ### 개발 과정
 
