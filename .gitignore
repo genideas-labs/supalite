@@ -91,7 +91,8 @@ out
 
 # Nuxt.js build / generate output
 .nuxt
-dist
+# dist - 빌드된 파일을 GitHub에 포함하기 위해 주석 처리
+# dist
 
 # Gatsby files
 .cache/
