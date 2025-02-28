@@ -4,6 +4,7 @@ yarn.lock
 pnpm-lock.yaml
 bun.lock
 .yarn/
+.pnp.*
 
 # Source files (TypeScript)
 src/
