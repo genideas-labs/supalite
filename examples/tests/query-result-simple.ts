@@ -39,6 +39,9 @@ type Database = {
   };
 };
 
+// 쿼리 결과 타입 정의
+type UserRow = Database['public']['Tables']['users']['Row'];
+
 // Supalite 클라이언트 인스턴스 생성
 const supalite = new SupaliteClient<Database>({
   connectionString: process.env.DB_CONNECTION || 'postgresql://postgres:postgres@localhost:5432/testdb',
@@ -65,30 +68,28 @@ async function example1() {
       throw new Error(`데이터 조회 중 에러 발생: ${error.message}`);
     }
     
-    // data가 존재하고 요소가 있는지 확인
-    // 타입 단언을 사용하여 TypeScript에게 data가 배열임을 알려줌
-    const users = data as any[];
-    if (users && users.length > 0) {
-      console.log(`조회된 사용자 수: ${users.length}`);
+    // data가 존재하고 배열인지 확인 (타입 가드)
+    if (data && Array.isArray(data) && data.length > 0) {
+      console.log(`조회된 사용자 수: ${data.length}`);
       
       // 배열 메서드 사용 (map)
-      const userNames = users.map(user => user.name);
+      const userNames = data.map(user => user.name);
       console.log('사용자 이름 목록:', userNames);
       
       // 배열 메서드 사용 (filter)
-      const filteredUsers = users.filter(user => 
+      const filteredUsers = data.filter(user => 
         user.email.endsWith('@example.com')
       );
       console.log('example.com 이메일을 사용하는 사용자:', filteredUsers);
       
       // 배열 메서드 사용 (forEach)
       console.log('모든 사용자 정보:');
-      users.forEach(user => {
+      data.forEach(user => {
         console.log(`ID: ${user.id}, 이름: ${user.name}, 이메일: ${user.email}`);
       });
       
       // 첫 번째 사용자 정보 가져오기 (Supabase 스타일)
-      const firstUser = users[0];
+      const firstUser = data[0];
       console.log('첫 번째 사용자:', firstUser);
     } else {
       console.log('조회된 사용자가 없습니다.');
@@ -119,21 +120,19 @@ async function example2() {
       throw new Error(`데이터 조회 중 에러 발생: ${error.message}`);
     }
     
-    // data가 존재하는지 확인
-    // 타입 단언을 사용하여 TypeScript에게 data가 배열임을 알려줌
-    const users = data as any[];
-    if (users) {
+    // data가 존재하고 배열인지 확인 (타입 가드)
+    if (data && Array.isArray(data)) {
       console.log('데이터가 있거나 빈 배열입니다');
       
       // 빈 배열 확인을 위해서는 length 속성 사용
-      if (users.length === 0) {
+      if (data.length === 0) {
         console.log('조회된 사용자가 없습니다');
       } else {
-        console.log(`조회된 사용자 수: ${users.length}`);
+        console.log(`조회된 사용자 수: ${data.length}`);
       }
       
       // 빈 배열에도 배열 메서드 사용 가능
-      const userNames = users.map(user => user.name);
+      const userNames = data.map(user => user.name);
       console.log('사용자 이름 목록:', userNames); // [] 출력
     } else {
       console.log('데이터가 없습니다 (이 메시지는 출력되지 않음)');
@@ -165,11 +164,10 @@ async function example3() {
     }
     
     // 이 코드는 에러가 없을 때만 실행됨
-    // 타입 단언을 사용하여 TypeScript에게 data가 배열임을 알려줌
-    const items = data as any[];
-    if (items && items.length > 0) {
-      console.log(`조회된 데이터 수: ${items.length}`);
-      items.forEach(item => {
+    // data가 존재하고 배열인지 확인 (타입 가드)
+    if (data && Array.isArray(data) && data.length > 0) {
+      console.log(`조회된 데이터 수: ${data.length}`);
+      data.forEach(item => {
         console.log(item);
       });
     } else {
@@ -212,17 +210,16 @@ async function example4() {
     }
     
     // 데이터 존재 여부 확인 (Supabase 스타일)
-    // 타입 단언을 사용하여 TypeScript에게 data가 배열임을 알려줌
-    const users = data as any[];
-    if (users && users.length > 0) {
-      console.log(`활성 사용자 수: ${users.length}`);
+    // data가 존재하고 배열인지 확인 (타입 가드)
+    if (data && Array.isArray(data) && data.length > 0) {
+      console.log(`활성 사용자 수: ${data.length}`);
       
       // 첫 번째 사용자 정보 출력 (Supabase 스타일)
-      const firstUser = users[0];
+      const firstUser = data[0];
       console.log('첫 번째 활성 사용자:', firstUser);
       
       // 특정 사용자 찾기 (Supabase 스타일)
-      const specificUser = users.find(user => user.name === '홍길동');
+      const specificUser = data.find(user => user.name === '홍길동');
       if (specificUser) {
         console.log('홍길동 사용자 정보:', specificUser);
       }
