@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.9] - 2025-03-02
+
+### Fixed
+- from 메서드의 반환 타입을 수정하여 single() 메서드를 호출할 때 SingleQueryResult를 반환하도록 개선
+- 타입 단언 없이도 single() 메서드를 사용할 수 있도록 수정
+- single() 메서드 사용 예제 추가
+
 ## [0.1.8] - 2025-03-02
 
 ### Fixed

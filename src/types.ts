@@ -105,7 +105,7 @@ export type BaseResult = {
 };
 
 export type QueryResult<T = any> = BaseResult & {
-  data: T[];
+  data: Array<T>;  // T[] 대신 Array<T>를 사용하여 명시적으로 배열임을 강조
 };
 
 export type SingleQueryResult<T = any> = BaseResult & {

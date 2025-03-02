@@ -1,5 +1,47 @@
 # 변경 작업 보고서
 
+## [2025-03-02] single() 메서드 반환 타입 수정을 통한 Supabase 호환성 개선
+
+### 작업 내용
+
+1. **문제 분석**:
+   - `single()` 메서드를 사용할 때 타입 단언 없이는 `data`가 단일 행임을 TypeScript가 인식하지 못하는 문제가 있었습니다.
+   - `from` 메서드의 반환 타입이 `QueryBuilder<T, S, K> & Promise<QueryResult<Row<T, S, K>>>`로만 정의되어 있어, `single()` 메서드를 호출할 때 `SingleQueryResult`를 반환하도록 되어 있지 않았습니다.
+
+2. **해결 방법**:
+   - `postgres-client.ts` 파일에서 `from` 메서드의 반환 타입을 `QueryBuilder<T, S, K> & Promise<QueryResult<Row<T, S, K>>> & { single(): Promise<SingleQueryResult<Row<T, S, K>>> }`로 수정했습니다.
+   - 이를 통해 `single()` 메서드를 호출할 때 자동으로 `SingleQueryResult<Row<T, S, K>>`를 반환하도록 했습니다.
+   - 타입 단언 없이도 `if (!data)` 조건을 사용하여 `data`가 `null`인지 확인할 수 있게 되었습니다.
+
+3. **Supabase 호환성 개선**:
+   - 이번 수정을 통해 Supabase 클라이언트를 사용하는 코드를 Supalite로 변경할 때 발생하는 타입 호환성 문제를 해결했습니다.
+   - Supabase 클라이언트에서는 `single()` 메서드를 호출할 때 `data`가 단일 행 또는 `null`로 인식되므로, Supalite도 동일한 동작을 하도록 수정했습니다.
+
+4. **예제 코드 작성**:
+   - `single()` 메서드를 사용하는 예제 파일 `examples/tests/query-result-single.ts`를 작성했습니다.
+   - 예제 코드에는 다음과 같은 내용이 포함되어 있습니다:
+     - `single()` 메서드를 사용하여 단일 행 조회
+     - 결과가 없을 때의 처리 (`if (!data)` 조건 사용)
+     - 여러 행이 반환될 때의 에러 처리
+     - 조건부 로직 처리
+     - 타입 안전성 확인
+
+5. **문서화**:
+   - CHANGELOG.md 파일을 업데이트하여 변경 사항을 문서화했습니다.
+   - 버전을 0.1.9로 업데이트했습니다.
+
+### 변경된 파일
+
+1. `src/postgres-client.ts`: `from` 메서드의 반환 타입을 수정하여 `single()` 메서드를 호출할 때 `SingleQueryResult`를 반환하도록 했습니다.
+2. `examples/tests/query-result-single.ts`: `single()` 메서드를 사용하는 예제 파일을 작성했습니다.
+3. `examples/tests/setup-single-test.ts`: 테스트 데이터베이스 설정 스크립트를 작성했습니다.
+4. `CHANGELOG.md`: 변경 사항을 문서화하고 버전을 0.1.9로 업데이트했습니다.
+5. `CHANGE_REPORT_LOG.md`: 변경 작업 보고서를 추가했습니다.
+
+### 결론
+
+이번 작업을 통해 Supalite 라이브러리의 Supabase 호환성을 개선했습니다. 이제 Supabase 클라이언트를 사용하는 코드를 Supalite로 변경할 때 `single()` 메서드를 사용하는 코드도 타입 단언 없이 그대로 사용할 수 있게 되었습니다.
+
 ## [2025-03-02] from 메서드 반환 타입 수정을 통한 Supabase 호환성 개선
 
 ### 작업 내용
