@@ -123,7 +123,8 @@ export class QueryBuilder<
     return this;
   }
 
-  order(column: string, { ascending = true }: { ascending: boolean }): this {
+  order(column: string, options?: { ascending?: boolean }): this {
+    const ascending = options?.ascending !== false; // undefined나 true면 오름차순, false만 내림차순
     this.orderByColumns.push(`"${column}" ${ascending ? 'ASC' : 'DESC'}`);
     return this;
   }
