@@ -77,7 +77,8 @@ class QueryBuilder {
         this.whereValues.push(value);
         return this;
     }
-    order(column, { ascending = true }) {
+    order(column, options) {
+        const ascending = options?.ascending !== false; // undefined나 true면 오름차순, false만 내림차순
         this.orderByColumns.push(`"${column}" ${ascending ? 'ASC' : 'DESC'}`);
         return this;
     }

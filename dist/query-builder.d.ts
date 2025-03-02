@@ -34,8 +34,8 @@ export declare class QueryBuilder<T extends DatabaseSchema, S extends SchemaName
     in(column: string, values: any[]): this;
     gte(column: string, value: any): this;
     lte(column: string, value: any): this;
-    order(column: string, { ascending }: {
-        ascending: boolean;
+    order(column: string, options?: {
+        ascending?: boolean;
     }): this;
     limit(value: number): this;
     offset(value: number): this;
