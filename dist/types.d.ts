@@ -74,7 +74,7 @@ export type BaseResult = {
     statusCode?: number;
 };
 export type QueryResult<T = any> = BaseResult & {
-    data: T[] | null;
+    data: Array<T>;
 };
 export type SingleQueryResult<T = any> = BaseResult & {
     data: T | null;
