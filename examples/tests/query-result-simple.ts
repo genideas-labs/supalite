@@ -58,7 +58,7 @@ async function example1() {
     // 데이터 조회
     const result = await supalite
       .from('users')
-      .select('*');
+      .select('*') as unknown as QueryResult<UserRow>;
     
     // 구조 분해 할당으로 data와 error 추출
     const { data, error } = result;
@@ -68,8 +68,8 @@ async function example1() {
       throw new Error(`데이터 조회 중 에러 발생: ${error.message}`);
     }
     
-    // data가 존재하고 배열인지 확인 (타입 가드)
-    if (data && Array.isArray(data) && data.length > 0) {
+    // data가 존재하고 요소가 있는지 확인
+    if (data && data.length > 0) {
       console.log(`조회된 사용자 수: ${data.length}`);
       
       // 배열 메서드 사용 (map)
@@ -110,18 +110,18 @@ async function example1() {
 async function example2() {
   try {
     // 존재하지 않는 조건으로 데이터 조회
-    const { data, error } = await supalite
+    const { data, error } = await (supalite
       .from('users')
       .select('*')
-      .eq('id', -1); // 존재하지 않는 ID
+      .eq('id', -1) as unknown as QueryResult<UserRow>); // 존재하지 않는 ID
     
     // 에러 확인
     if (error) {
       throw new Error(`데이터 조회 중 에러 발생: ${error.message}`);
     }
     
-    // data가 존재하고 배열인지 확인 (타입 가드)
-    if (data && Array.isArray(data)) {
+    // data가 존재하는지 확인
+    if (data) {
       console.log('데이터가 있거나 빈 배열입니다');
       
       // 빈 배열 확인을 위해서는 length 속성 사용
@@ -155,7 +155,7 @@ async function example3() {
     // 잘못된 테이블 이름으로 데이터 조회 시도
     const { data, error } = await (supalite
       .from('non_existent_table' as any)
-      .select('*'));
+      .select('*') as unknown as QueryResult<any>);
     
     // 에러 확인 (Supabase 스타일)
     if (error) {
@@ -164,8 +164,8 @@ async function example3() {
     }
     
     // 이 코드는 에러가 없을 때만 실행됨
-    // data가 존재하고 배열인지 확인 (타입 가드)
-    if (data && Array.isArray(data) && data.length > 0) {
+    // data가 존재하고 요소가 있는지 확인
+    if (data && data.length > 0) {
       console.log(`조회된 데이터 수: ${data.length}`);
       data.forEach(item => {
         console.log(item);
@@ -199,10 +199,10 @@ async function example3() {
 async function example4() {
   try {
     // 데이터 조회
-    const { data, error } = await supalite
+    const { data, error } = await (supalite
       .from('users')
       .select('*')
-      .eq('status', 'active');
+      .eq('status', 'active') as unknown as QueryResult<UserRow>);
     
     // 에러 확인
     if (error) {
@@ -210,8 +210,8 @@ async function example4() {
     }
     
     // 데이터 존재 여부 확인 (Supabase 스타일)
-    // data가 존재하고 배열인지 확인 (타입 가드)
-    if (data && Array.isArray(data) && data.length > 0) {
+    // data가 존재하고 요소가 있는지 확인
+    if (data && data.length > 0) {
       console.log(`활성 사용자 수: ${data.length}`);
       
       // 첫 번째 사용자 정보 출력 (Supabase 스타일)
