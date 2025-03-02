@@ -75,8 +75,8 @@ export type UpdateRow<
   K extends TableOrViewName<T, S>
 > = K extends TableName<T, S> 
   ? T[S]['Tables'][K]['Update'] & {
-      modified_at?: string;
-      updated_at?: string;
+      modified_at?: string | null;
+      updated_at?: string | null;
     }
   : never; // Views는 Update 불가능
 
