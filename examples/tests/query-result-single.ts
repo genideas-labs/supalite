@@ -44,7 +44,7 @@ type UserRow = Database['public']['Tables']['users']['Row'];
 
 // Supalite 클라이언트 인스턴스 생성
 const supalite = new SupaliteClient<Database>({
-  connectionString: process.env.DB_CONNECTION || 'postgresql://postgres:postgres@localhost:5432/testdb',
+  connectionString: process.env.DB_CONNECTION || 'postgresql://testuser:testpassword@localhost:5432/testdb',
 });
 
 /**
