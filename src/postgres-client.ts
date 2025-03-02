@@ -1,7 +1,7 @@
 import { Pool, types } from 'pg';
 import { QueryBuilder } from './query-builder';
 import { PostgresError } from './errors';
-import { TableName, SupaliteConfig, Row, DatabaseSchema, SchemaName, AsDatabaseSchema } from './types';
+import { TableName, SupaliteConfig, Row, DatabaseSchema, SchemaName, AsDatabaseSchema, QueryResult } from './types';
 import { config as dotenvConfig } from 'dotenv';
 
 // .env 파일 로드
@@ -141,20 +141,20 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
 
   from<K extends keyof T['public']['Tables']>(
     table: K
-  ): QueryBuilder<T, 'public', K>;
+  ): QueryBuilder<T, 'public', K> & Promise<QueryResult<Row<T, 'public', K>>>;
   from<S extends keyof T, K extends keyof T[S]['Tables']>(
     table: K,
     schema: S
-  ): QueryBuilder<T, S, K>;
+  ): QueryBuilder<T, S, K> & Promise<QueryResult<Row<T, S, K>>>;
   from<S extends keyof T, K extends keyof T[S]['Tables']>(
     table: K,
     schema?: S
-  ): QueryBuilder<T, S, K> {
+  ): QueryBuilder<T, S, K> & Promise<QueryResult<Row<T, S, K>>> {
     return new QueryBuilder<T, S, K>(
       this.pool,
       table,
       schema || 'public' as S
-    );
+    ) as QueryBuilder<T, S, K> & Promise<QueryResult<Row<T, S, K>>>;
   }
 
   async rpc(

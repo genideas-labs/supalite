@@ -58,7 +58,7 @@ async function example1() {
     // 데이터 조회
     const result = await supalite
       .from('users')
-      .select('*') as unknown as QueryResult<UserRow>;
+      .select('*');
     
     // 구조 분해 할당으로 data와 error 추출
     const { data, error } = result;
@@ -110,10 +110,10 @@ async function example1() {
 async function example2() {
   try {
     // 존재하지 않는 조건으로 데이터 조회
-    const { data, error } = await (supalite
+    const { data, error } = await supalite
       .from('users')
       .select('*')
-      .eq('id', -1) as unknown as QueryResult<UserRow>); // 존재하지 않는 ID
+      .eq('id', -1); // 존재하지 않는 ID
     
     // 에러 확인
     if (error) {
@@ -153,9 +153,9 @@ async function example2() {
 async function example3() {
   try {
     // 잘못된 테이블 이름으로 데이터 조회 시도
-    const { data, error } = await (supalite
+    const { data, error } = await supalite
       .from('non_existent_table' as any)
-      .select('*') as unknown as QueryResult<any>);
+      .select('*');
     
     // 에러 확인 (Supabase 스타일)
     if (error) {
@@ -199,10 +199,10 @@ async function example3() {
 async function example4() {
   try {
     // 데이터 조회
-    const { data, error } = await (supalite
+    const { data, error } = await supalite
       .from('users')
       .select('*')
-      .eq('status', 'active') as unknown as QueryResult<UserRow>);
+      .eq('status', 'active');
     
     // 에러 확인
     if (error) {

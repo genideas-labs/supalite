@@ -1,5 +1,49 @@
 # 변경 작업 보고서
 
+## [2025-03-02] from 메서드 반환 타입 수정을 통한 Supabase 호환성 개선
+
+### 작업 내용
+
+1. **문제 분석**:
+   - Supabase 클라이언트를 사용하는 코드를 Supalite로 변경했을 때 TypeScript 에러가 발생했습니다.
+   - 에러 메시지: `Property 'length' does not exist on type...` 및 `Argument of type '... | null' is not assignable to parameter of type 'any[]'`
+   - 원인은 `from` 메서드의 반환 타입이 `QueryBuilder`로만 정의되어 있어, `await`를 사용할 때 `data`가 배열임을 TypeScript가 인식하지 못하기 때문이었습니다.
+
+2. **해결 방법**:
+   - `postgres-client.ts` 파일에서 `from` 메서드의 반환 타입을 `QueryBuilder<T, S, K> & Promise<QueryResult<Row<T, S, K>>>`로 수정했습니다.
+   - 이를 통해 `await`를 사용할 때 자동으로 `QueryResult<Row<T, S, K>>`를 반환하도록 했습니다.
+   - 타입 단언 없이도 `data.length`와 같은 배열 메서드를 사용할 수 있게 되었습니다.
+
+3. **Supabase 호환성 개선**:
+   - 이번 수정을 통해 Supabase 클라이언트를 사용하는 코드를 Supalite로 변경할 때 발생하는 타입 호환성 문제를 해결했습니다.
+   - Supabase 클라이언트에서는 `await supabase.from('table').select('*')`와 같은 코드에서 `data`가 항상 배열로 인식되므로, Supalite도 동일한 동작을 하도록 수정했습니다.
+
+4. **문서화**:
+   - CHANGELOG.md 파일을 업데이트하여 변경 사항을 문서화했습니다.
+   - CHANGE_REPORT_LOG.md 파일에 변경 작업 보고서를 추가했습니다.
+
+### 변경된 파일
+
+1. `src/postgres-client.ts`: `from` 메서드의 반환 타입을 `QueryBuilder<T, S, K> & Promise<QueryResult<Row<T, S, K>>>`로 수정
+2. `examples/tests/query-result-simple.ts`: 타입 단언 제거 및 테스트
+3. `CHANGELOG.md`: 변경 사항 문서화
+4. `CHANGE_REPORT_LOG.md`: 변경 작업 보고서 추가
+
+### 테스트 결과
+
+수정된 코드로 다음 테스트를 수행했습니다:
+
+1. 타입 단언 없이도 `data.length`와 같은 배열 메서드를 사용할 수 있는지 확인
+2. 타입 단언 없이도 `data.map()`, `data.filter()`, `data.forEach()` 등의 배열 메서드를 사용할 수 있는지 확인
+3. 타입 단언 없이도 `data[0]`과 같은 인덱스 접근이 가능한지 확인
+4. 타입 단언 없이도 `data.find()`와 같은 배열 메서드를 사용할 수 있는지 확인
+
+모든 테스트가 성공적으로 완료되었습니다.
+
+### 결론
+
+이번 작업을 통해 Supalite 라이브러리의 Supabase 호환성을 개선했습니다. 이제 Supabase 클라이언트를 사용하는 코드를 Supalite로 변경할 때 타입 단언 없이도 배열 메서드를 사용할 수 있게 되었습니다.
+
 ## [2025-03-02] QueryResult 타입 수정을 통한 Supabase 호환성 개선
 
 ### 작업 내용
