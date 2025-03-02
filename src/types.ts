@@ -105,7 +105,7 @@ export type BaseResult = {
 };
 
 export type QueryResult<T = any> = BaseResult & {
-  data: T[] | null;
+  data: T[];
 };
 
 export type SingleQueryResult<T = any> = BaseResult & {

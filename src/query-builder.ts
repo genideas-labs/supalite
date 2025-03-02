@@ -373,12 +373,12 @@ export class QueryBuilder<
 
       if (this.queryType === 'INSERT' && !this.shouldReturnData()) {
         return {
-          data: null,
+          data: [],
           error: null,
           count: result.rowCount,
           status: 201,
           statusText: 'Created',
-        };
+        } as QueryResult<Row<T, S, K>>;
       }
 
       if (this.isSingleResult) {
@@ -412,7 +412,7 @@ export class QueryBuilder<
       }
 
       return {
-        data: result.rows.length > 0 ? result.rows : null,
+        data: result.rows.length > 0 ? result.rows : [],
         error: null,
         count: result.rowCount,
         status: 200,
@@ -420,12 +420,12 @@ export class QueryBuilder<
       } as QueryResult<Row<T, S, K>>;
     } catch (err: any) {
       return {
-        data: null,
+        data: [],
         error: new PostgresError(err.message),
         count: null,
         status: 500,
         statusText: 'Internal Server Error',
-      };
+      } as QueryResult<Row<T, S, K>>;
     }
   }
 

@@ -1,5 +1,58 @@
 # 변경 작업 보고서
 
+## [2025-03-02] QueryResult 타입 수정을 통한 Supabase 호환성 개선
+
+### 작업 내용
+
+1. **문제 분석**:
+   - Supabase 클라이언트를 사용하는 코드를 Supalite로 변경했을 때 TypeScript 에러가 발생했습니다.
+   - 에러 메시지: `Property 'length' does not exist on type...` 및 `Argument of type '... | null' is not assignable to parameter of type 'any[]'`
+   - 원인은 Supalite의 `QueryResult` 타입에서 `data` 필드가 `T[] | null` 타입으로 정의되어 있어, 배열이 아닐 수 있는데 코드에서는 항상 배열로 가정하고 있기 때문이었습니다.
+
+2. **해결 방법**:
+   - `types.ts` 파일에서 `QueryResult` 타입의 `data` 필드를 `T[]`로 수정하여 항상 배열을 반환하도록 했습니다.
+   - `query-builder.ts` 파일에서 쿼리 결과가 없을 때 `null` 대신 빈 배열(`[]`)을 반환하도록 수정했습니다.
+   - 에러 발생 시에도 `data` 필드가 빈 배열을 반환하도록 수정했습니다.
+
+3. **Supabase 호환성 개선**:
+   - 이번 수정을 통해 Supabase 클라이언트를 사용하는 코드를 Supalite로 변경할 때 발생하는 타입 호환성 문제를 해결했습니다.
+   - Supabase 클라이언트에서는 쿼리 결과의 `data` 필드가 항상 배열을 반환하므로, Supalite도 동일한 동작을 하도록 수정했습니다.
+
+4. **문서화**:
+   - CHANGELOG.md 파일을 업데이트하여 변경 사항을 문서화했습니다.
+   - 버전을 0.1.7로 업데이트했습니다.
+
+### 변경된 파일
+
+1. `src/types.ts`: `QueryResult` 타입의 `data` 필드를 `T[] | null`에서 `T[]`로 수정
+2. `src/query-builder.ts`: 쿼리 결과가 없을 때와 에러 발생 시 빈 배열을 반환하도록 수정
+3. `CHANGELOG.md`: 변경 사항 문서화 및 버전 업데이트
+4. `CHANGE_REPORT_LOG.md`: 변경 작업 보고서 추가
+
+### 개발 과정
+
+1. fix/query-result-type 브랜치 생성
+2. `types.ts` 파일에서 `QueryResult` 타입 수정
+3. `query-builder.ts` 파일에서 결과 반환 로직 수정
+4. 문서화 및 버전 업데이트
+5. 변경 사항 커밋
+6. main 브랜치로 병합
+
+### 테스트 결과
+
+수정된 코드로 다음 테스트를 수행했습니다:
+
+1. 쿼리 결과가 있을 때 배열이 정상적으로 반환되는지 확인
+2. 쿼리 결과가 없을 때 빈 배열이 반환되는지 확인
+3. 에러 발생 시 빈 배열이 반환되는지 확인
+4. Supabase 클라이언트를 사용하는 코드를 Supalite로 변경했을 때 TypeScript 에러가 발생하지 않는지 확인
+
+모든 테스트가 성공적으로 완료되었습니다.
+
+### 결론
+
+이번 작업을 통해 Supalite 라이브러리의 Supabase 호환성을 개선했습니다. 이제 Supabase 클라이언트를 사용하는 코드를 Supalite로 변경할 때 타입 호환성 문제가 발생하지 않으며, 쿼리 결과의 `data` 필드가 항상 배열을 반환하므로 코드에서 안전하게 배열 메서드를 사용할 수 있습니다.
+
 ## [2025-03-01] corepack을 통한 다중 패키지 관리자 지원 추가
 
 ### 작업 내용
