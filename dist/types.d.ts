@@ -40,8 +40,8 @@ export type TableOrViewName<T extends DatabaseSchema, S extends SchemaName<T> = 
 export type Row<T extends DatabaseSchema, S extends SchemaName<T>, K extends TableOrViewName<T, S>> = K extends TableName<T, S> ? T[S]['Tables'][K]['Row'] : K extends ViewName<T, S> ? NonNullable<T[S]['Views']>[K]['Row'] : never;
 export type InsertRow<T extends DatabaseSchema, S extends SchemaName<T>, K extends TableOrViewName<T, S>> = K extends TableName<T, S> ? T[S]['Tables'][K]['Insert'] : never;
 export type UpdateRow<T extends DatabaseSchema, S extends SchemaName<T>, K extends TableOrViewName<T, S>> = K extends TableName<T, S> ? T[S]['Tables'][K]['Update'] & {
-    modified_at?: string;
-    updated_at?: string;
+    modified_at?: string | null;
+    updated_at?: string | null;
 } : never;
 export type EnumType<T extends DatabaseSchema, S extends SchemaName<T>, E extends keyof NonNullable<T[S]['Enums']>> = NonNullable<T[S]['Enums']>[E];
 export interface SupaliteConfig {
