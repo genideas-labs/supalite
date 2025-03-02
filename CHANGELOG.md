@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.13] - 2025-03-02
+
+### Fixed
+- modified_at과 updated_at 필드를 nullable로 변경하여 NULL 값 처리 개선
+- 타입 안전성 향상
+
 ## [0.1.12] - 2025-03-02
 
 ### Added
