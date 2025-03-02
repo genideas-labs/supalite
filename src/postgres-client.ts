@@ -1,7 +1,7 @@
 import { Pool, types } from 'pg';
 import { QueryBuilder } from './query-builder';
 import { PostgresError } from './errors';
-import { TableName, SupaliteConfig, Row, DatabaseSchema, SchemaName, AsDatabaseSchema, QueryResult, SingleQueryResult } from './types';
+import { TableName, TableOrViewName, SupaliteConfig, Row, DatabaseSchema, SchemaName, AsDatabaseSchema, QueryResult, SingleQueryResult } from './types';
 import { config as dotenvConfig } from 'dotenv';
 
 // .env 파일 로드
@@ -21,7 +21,11 @@ type SchemaWithTables = {
       Relationships: unknown[];
     };
   };
-  Views?: any;
+  Views?: {
+    [key: string]: {
+      Row: any;
+    };
+  };
   Functions?: any;
   Enums?: any;
   CompositeTypes?: any;
@@ -139,14 +143,14 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
     }
   }
 
-  from<K extends keyof T['public']['Tables']>(
+  from<K extends TableOrViewName<T, 'public'>>(
     table: K
   ): QueryBuilder<T, 'public', K> & Promise<QueryResult<Row<T, 'public', K>>> & { single(): Promise<SingleQueryResult<Row<T, 'public', K>>> };
-  from<S extends keyof T, K extends keyof T[S]['Tables']>(
+  from<S extends keyof T, K extends TableOrViewName<T, S>>(
     table: K,
     schema: S
   ): QueryBuilder<T, S, K> & Promise<QueryResult<Row<T, S, K>>> & { single(): Promise<SingleQueryResult<Row<T, S, K>>> };
-  from<S extends keyof T, K extends keyof T[S]['Tables']>(
+  from<S extends keyof T, K extends TableOrViewName<T, S>>(
     table: K,
     schema?: S
   ): QueryBuilder<T, S, K> & Promise<QueryResult<Row<T, S, K>>> & { single(): Promise<SingleQueryResult<Row<T, S, K>>> } {

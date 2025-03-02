@@ -128,7 +128,25 @@ export interface Database {
       };
     };
     Views: {
-      [_ in never]: never;
+      user_posts_view: {
+        Row: {
+          user_id: number;
+          user_name: string;
+          post_id: number;
+          post_title: string;
+          post_content: string | null;
+          post_created_at: string;
+        };
+      };
+      active_users_view: {
+        Row: {
+          id: number;
+          name: string;
+          email: string;
+          last_login: string | null;
+          post_count: number;
+        };
+      };
     };
     Functions: {
       [_ in never]: never;

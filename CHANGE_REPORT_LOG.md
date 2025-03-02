@@ -1,441 +1,121 @@
-# 변경 작업 보고서
+# 변경 사항 상세 보고서
 
-## [2025-03-02] 빌드 결과물 업데이트 및 배포 문제 해결
+## 날짜: 2025-03-02
+## 버전: 0.1.12
+## 기능: Views 테이블 조회 기능 추가
 
-### 작업 내용
+### 개요
+이번 업데이트에서는 Supabase 데이터베이스 타입 정의에서 Views 테이블도 조회할 수 있도록 기능을 추가했습니다. 이를 통해 사용자는 일반 테이블뿐만 아니라 데이터베이스 뷰도 동일한 방식으로 조회할 수 있게 되었습니다.
 
-1. **문제 분석**:
-   - 이전 버전(0.1.10)에서 `order` 메서드를 수정한 후 빌드 결과물이 제대로 커밋되지 않았습니다.
-   - npm publish 명령어를 실행했지만, 같은 버전으로 다시 배포할 수 없는 문제가 있었습니다.
+### 변경 사항 상세 내용
 
-2. **해결 방법**:
-   - 프로젝트를 다시 빌드하여 최신 소스 코드가 반영된 빌드 결과물을 생성했습니다.
-   - 빌드 결과물(`dist/query-builder.d.ts`, `dist/query-builder.js`)을 커밋했습니다.
-   - 버전을 0.1.10에서 0.1.11로 업데이트했습니다.
+#### 1. 타입 정의 수정 (`src/types.ts`)
+- `ViewName` 타입 추가: 스키마 내의 Views 이름을 참조하는 타입
+- `TableOrViewName` 타입 추가: Tables와 Views를 모두 포함하는 통합 타입
+- `Row`, `InsertRow`, `UpdateRow` 타입 수정: Views도 처리할 수 있도록 조건부 타입 적용
+  - Views는 읽기 전용이므로 `InsertRow`와 `UpdateRow`는 Views에 대해 `never` 타입 반환
 
-3. **문서화**:
-   - CHANGELOG.md 파일을 업데이트하여 변경 사항을 문서화했습니다.
-   - CHANGE_REPORT_LOG.md 파일에 변경 작업 보고서를 추가했습니다.
+```typescript
+export type ViewName<
+  T extends DatabaseSchema,
+  S extends SchemaName<T> = SchemaName<T>
+> = keyof NonNullable<T[S]['Views']>;
 
-### 변경된 파일
+export type TableOrViewName<
+  T extends DatabaseSchema,
+  S extends SchemaName<T> = SchemaName<T>
+> = TableName<T, S> | ViewName<T, S>;
 
-1. `dist/query-builder.d.ts`: 빌드 결과물 업데이트
-2. `dist/query-builder.js`: 빌드 결과물 업데이트
-3. `package.json`: 버전을 0.1.11로 업데이트
-4. `CHANGELOG.md`: 변경 사항 문서화
-5. `CHANGE_REPORT_LOG.md`: 변경 작업 보고서 추가
+export type Row<
+  T extends DatabaseSchema,
+  S extends SchemaName<T>,
+  K extends TableOrViewName<T, S>
+> = K extends TableName<T, S> 
+  ? T[S]['Tables'][K]['Row'] 
+  : K extends ViewName<T, S> 
+    ? NonNullable<T[S]['Views']>[K]['Row'] 
+    : never;
+```
 
-### 결론
+#### 2. 쿼리 빌더 수정 (`src/query-builder.ts`)
+- `QueryBuilder` 클래스의 제네릭 타입 매개변수를 `TableOrViewName`으로 변경하여 Views도 처리할 수 있도록 수정
 
-이번 작업을 통해 빌드 결과물이 제대로 커밋되고, 새 버전이 npm 레지스트리에 배포될 수 있도록 했습니다. 이를 통해 사용자들이 최신 기능과 버그 수정이 포함된 버전을 사용할 수 있게 되었습니다.
+```typescript
+export class QueryBuilder<
+  T extends DatabaseSchema,
+  S extends SchemaName<T> = 'public',
+  K extends TableOrViewName<T, S> = TableOrViewName<T, S>
+> implements Promise<QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>>> {
+  // ...
+}
+```
 
-## [2025-03-02] order 메서드 수정을 통한 Supabase 호환성 개선
+#### 3. PostgreSQL 클라이언트 수정 (`src/postgres-client.ts`)
+- `SchemaWithTables` 타입 수정: Views 타입 정의 추가
+- `from` 메서드 시그니처 수정: `TableOrViewName` 타입을 사용하도록 변경
 
-### 작업 내용
+```typescript
+type SchemaWithTables = {
+  Tables: {
+    [key: string]: {
+      Row: any;
+      Insert: any;
+      Update: any;
+      Relationships: unknown[];
+    };
+  };
+  Views?: {
+    [key: string]: {
+      Row: any;
+    };
+  };
+  // ...
+};
 
-1. **문제 분석**:
-   - Supabase 클라이언트를 사용하는 코드를 Supalite로 변경했을 때 `.order('post_index')` 형식의 쿼리가 동작하지 않는 문제가 있었습니다.
-   - 기존 `order` 메서드는 `column`과 `{ ascending: boolean }` 객체를 필수 매개변수로 받고 있어, 컬럼 이름만 전달하는 경우에는 사용할 수 없었습니다.
-   - 사용자가 요청한 형식인 `.order('post_index')`와 같이 컬럼 이름만 전달하는 경우에도 기본적으로 오름차순 정렬이 적용되도록 수정이 필요했습니다.
+from<K extends TableOrViewName<T, 'public'>>(
+  table: K
+): QueryBuilder<T, 'public', K> & Promise<QueryResult<Row<T, 'public', K>>> & { single(): Promise<SingleQueryResult<Row<T, 'public', K>>> };
+```
 
-2. **해결 방법**:
-   - `query-builder.ts` 파일에서 `order` 메서드의 시그니처를 변경하여 두 번째 매개변수를 선택적(optional)으로 만들었습니다.
-   - `options?.ascending !== false` 조건을 사용하여 `ascending` 매개변수가 `undefined`나 `true`인 경우에는 오름차순 정렬이 적용되도록 했습니다.
-   - 이를 통해 `.order('post_index')`와 같이 컬럼 이름만 전달하는 경우에도 기본적으로 오름차순 정렬이 적용되도록 했습니다.
+#### 4. 예제 데이터베이스 타입 정의 수정 (`examples/types/database.ts`)
+- 예제 데이터베이스 타입 정의에 Views 추가
+- `user_posts_view`와 `active_users_view` 뷰 정의 추가
 
-3. **Supabase 호환성 개선**:
-   - 이번 수정을 통해 Supabase 클라이언트를 사용하는 코드를 Supalite로 변경할 때 발생하는 호환성 문제를 해결했습니다.
-   - Supabase 클라이언트에서는 `.order('post_index')`와 같이 컬럼 이름만 전달하는 경우에도 오름차순 정렬이 적용되므로, Supalite도 동일한 동작을 하도록 수정했습니다.
+```typescript
+Views: {
+  user_posts_view: {
+    Row: {
+      user_id: number;
+      user_name: string;
+      post_id: number;
+      post_title: string;
+      post_content: string | null;
+      post_created_at: string;
+    };
+  };
+  active_users_view: {
+    Row: {
+      id: number;
+      name: string;
+      email: string;
+      last_login: string | null;
+      post_count: number;
+    };
+  };
+}
+```
 
-4. **예제 코드 작성**:
-   - `order` 메서드를 사용하는 예제 파일 `examples/tests/order-method.ts`를 작성했습니다.
-   - 예제 코드에는 다음과 같은 내용이 포함되어 있습니다:
-     - 컬럼 이름만 전달하는 경우 (오름차순)
-     - 오름차순을 명시적으로 지정하는 경우
-     - 내림차순을 지정하는 경우
-     - Supabase 스타일 쿼리 테스트
-
-5. **문서화**:
-   - CHANGELOG.md 파일을 업데이트하여 변경 사항을 문서화했습니다.
-   - 버전을 0.1.10으로 업데이트했습니다.
-
-### 변경된 파일
-
-1. `src/query-builder.ts`: `order` 메서드의 시그니처를 변경하여 두 번째 매개변수를 선택적으로 만들었습니다.
-2. `examples/tests/order-method.ts`: `order` 메서드를 사용하는 예제 파일을 작성했습니다.
-3. `CHANGELOG.md`: 변경 사항을 문서화하고 버전을 0.1.10으로 업데이트했습니다.
-4. `CHANGE_REPORT_LOG.md`: 변경 작업 보고서를 추가했습니다.
-
-### 결론
-
-이번 작업을 통해 Supalite 라이브러리의 Supabase 호환성을 개선했습니다. 이제 Supabase 클라이언트를 사용하는 코드를 Supalite로 변경할 때 `.order('post_index')` 형식의 쿼리도 그대로 사용할 수 있게 되었습니다.
-
-## [2025-03-02] single() 메서드 반환 타입 수정을 통한 Supabase 호환성 개선
-
-### 작업 내용
-
-1. **문제 분석**:
-   - `single()` 메서드를 사용할 때 타입 단언 없이는 `data`가 단일 행임을 TypeScript가 인식하지 못하는 문제가 있었습니다.
-   - `from` 메서드의 반환 타입이 `QueryBuilder<T, S, K> & Promise<QueryResult<Row<T, S, K>>>`로만 정의되어 있어, `single()` 메서드를 호출할 때 `SingleQueryResult`를 반환하도록 되어 있지 않았습니다.
-
-2. **해결 방법**:
-   - `postgres-client.ts` 파일에서 `from` 메서드의 반환 타입을 `QueryBuilder<T, S, K> & Promise<QueryResult<Row<T, S, K>>> & { single(): Promise<SingleQueryResult<Row<T, S, K>>> }`로 수정했습니다.
-   - 이를 통해 `single()` 메서드를 호출할 때 자동으로 `SingleQueryResult<Row<T, S, K>>`를 반환하도록 했습니다.
-   - 타입 단언 없이도 `if (!data)` 조건을 사용하여 `data`가 `null`인지 확인할 수 있게 되었습니다.
-
-3. **Supabase 호환성 개선**:
-   - 이번 수정을 통해 Supabase 클라이언트를 사용하는 코드를 Supalite로 변경할 때 발생하는 타입 호환성 문제를 해결했습니다.
-   - Supabase 클라이언트에서는 `single()` 메서드를 호출할 때 `data`가 단일 행 또는 `null`로 인식되므로, Supalite도 동일한 동작을 하도록 수정했습니다.
-
-4. **예제 코드 작성**:
-   - `single()` 메서드를 사용하는 예제 파일 `examples/tests/query-result-single.ts`를 작성했습니다.
-   - 예제 코드에는 다음과 같은 내용이 포함되어 있습니다:
-     - `single()` 메서드를 사용하여 단일 행 조회
-     - 결과가 없을 때의 처리 (`if (!data)` 조건 사용)
-     - 여러 행이 반환될 때의 에러 처리
-     - 조건부 로직 처리
-     - 타입 안전성 확인
-
-5. **문서화**:
-   - CHANGELOG.md 파일을 업데이트하여 변경 사항을 문서화했습니다.
-   - 버전을 0.1.9로 업데이트했습니다.
-
-### 변경된 파일
-
-1. `src/postgres-client.ts`: `from` 메서드의 반환 타입을 수정하여 `single()` 메서드를 호출할 때 `SingleQueryResult`를 반환하도록 했습니다.
-2. `examples/tests/query-result-single.ts`: `single()` 메서드를 사용하는 예제 파일을 작성했습니다.
-3. `examples/tests/setup-single-test.ts`: 테스트 데이터베이스 설정 스크립트를 작성했습니다.
-4. `CHANGELOG.md`: 변경 사항을 문서화하고 버전을 0.1.9로 업데이트했습니다.
-5. `CHANGE_REPORT_LOG.md`: 변경 작업 보고서를 추가했습니다.
-
-### 결론
-
-이번 작업을 통해 Supalite 라이브러리의 Supabase 호환성을 개선했습니다. 이제 Supabase 클라이언트를 사용하는 코드를 Supalite로 변경할 때 `single()` 메서드를 사용하는 코드도 타입 단언 없이 그대로 사용할 수 있게 되었습니다.
-
-## [2025-03-02] from 메서드 반환 타입 수정을 통한 Supabase 호환성 개선
-
-### 작업 내용
-
-1. **문제 분석**:
-   - Supabase 클라이언트를 사용하는 코드를 Supalite로 변경했을 때 TypeScript 에러가 발생했습니다.
-   - 에러 메시지: `Property 'length' does not exist on type...` 및 `Argument of type '... | null' is not assignable to parameter of type 'any[]'`
-   - 원인은 `from` 메서드의 반환 타입이 `QueryBuilder`로만 정의되어 있어, `await`를 사용할 때 `data`가 배열임을 TypeScript가 인식하지 못하기 때문이었습니다.
-
-2. **해결 방법**:
-   - `postgres-client.ts` 파일에서 `from` 메서드의 반환 타입을 `QueryBuilder<T, S, K> & Promise<QueryResult<Row<T, S, K>>>`로 수정했습니다.
-   - 이를 통해 `await`를 사용할 때 자동으로 `QueryResult<Row<T, S, K>>`를 반환하도록 했습니다.
-   - 타입 단언 없이도 `data.length`와 같은 배열 메서드를 사용할 수 있게 되었습니다.
-
-3. **Supabase 호환성 개선**:
-   - 이번 수정을 통해 Supabase 클라이언트를 사용하는 코드를 Supalite로 변경할 때 발생하는 타입 호환성 문제를 해결했습니다.
-   - Supabase 클라이언트에서는 `await supabase.from('table').select('*')`와 같은 코드에서 `data`가 항상 배열로 인식되므로, Supalite도 동일한 동작을 하도록 수정했습니다.
-
-4. **문서화**:
-   - CHANGELOG.md 파일을 업데이트하여 변경 사항을 문서화했습니다.
-   - CHANGE_REPORT_LOG.md 파일에 변경 작업 보고서를 추가했습니다.
-
-### 변경된 파일
-
-1. `src/postgres-client.ts`: `from` 메서드의 반환 타입을 `QueryBuilder<T, S, K> & Promise<QueryResult<Row<T, S, K>>>`로 수정
-2. `examples/tests/query-result-simple.ts`: 타입 단언 제거 및 테스트
-3. `CHANGELOG.md`: 변경 사항 문서화
-4. `CHANGE_REPORT_LOG.md`: 변경 작업 보고서 추가
+#### 5. 테스트 및 예제 코드 추가
+- View 테이블 조회 예제 코드 작성 (`examples/tests/view-table.ts`)
+- 테스트용 SQL 스크립트 작성 (`examples/setup-views.sql`)
+  - 테이블 생성 및 샘플 데이터 삽입
+  - View 생성 (user_posts_view, active_users_view)
 
 ### 테스트 결과
-
-수정된 코드로 다음 테스트를 수행했습니다:
-
-1. 타입 단언 없이도 `data.length`와 같은 배열 메서드를 사용할 수 있는지 확인
-2. 타입 단언 없이도 `data.map()`, `data.filter()`, `data.forEach()` 등의 배열 메서드를 사용할 수 있는지 확인
-3. 타입 단언 없이도 `data[0]`과 같은 인덱스 접근이 가능한지 확인
-4. 타입 단언 없이도 `data.find()`와 같은 배열 메서드를 사용할 수 있는지 확인
-
-모든 테스트가 성공적으로 완료되었습니다.
+- View 테이블 조회 기능이 정상적으로 작동함을 확인
+- 일반 테이블과 동일한 방식으로 View 테이블을 조회할 수 있음
+- 타입 안전성이 유지됨
+- 기존 코드와의 호환성이 유지됨
 
 ### 결론
-
-이번 작업을 통해 Supalite 라이브러리의 Supabase 호환성을 개선했습니다. 이제 Supabase 클라이언트를 사용하는 코드를 Supalite로 변경할 때 타입 단언 없이도 배열 메서드를 사용할 수 있게 되었습니다.
-
-## [2025-03-02] QueryResult 타입 수정을 통한 Supabase 호환성 개선
-
-### 작업 내용
-
-1. **문제 분석**:
-   - Supabase 클라이언트를 사용하는 코드를 Supalite로 변경했을 때 TypeScript 에러가 발생했습니다.
-   - 에러 메시지: `Property 'length' does not exist on type...` 및 `Argument of type '... | null' is not assignable to parameter of type 'any[]'`
-   - 원인은 Supalite의 `QueryResult` 타입에서 `data` 필드가 `T[] | null` 타입으로 정의되어 있어, 배열이 아닐 수 있는데 코드에서는 항상 배열로 가정하고 있기 때문이었습니다.
-
-2. **해결 방법**:
-   - `types.ts` 파일에서 `QueryResult` 타입의 `data` 필드를 `T[]`로 수정하여 항상 배열을 반환하도록 했습니다.
-   - `query-builder.ts` 파일에서 쿼리 결과가 없을 때 `null` 대신 빈 배열(`[]`)을 반환하도록 수정했습니다.
-   - 에러 발생 시에도 `data` 필드가 빈 배열을 반환하도록 수정했습니다.
-
-3. **Supabase 호환성 개선**:
-   - 이번 수정을 통해 Supabase 클라이언트를 사용하는 코드를 Supalite로 변경할 때 발생하는 타입 호환성 문제를 해결했습니다.
-   - Supabase 클라이언트에서는 쿼리 결과의 `data` 필드가 항상 배열을 반환하므로, Supalite도 동일한 동작을 하도록 수정했습니다.
-
-4. **문서화**:
-   - CHANGELOG.md 파일을 업데이트하여 변경 사항을 문서화했습니다.
-   - 버전을 0.1.7로 업데이트했습니다.
-
-### 변경된 파일
-
-1. `src/types.ts`: `QueryResult` 타입의 `data` 필드를 `T[] | null`에서 `T[]`로 수정
-2. `src/query-builder.ts`: 쿼리 결과가 없을 때와 에러 발생 시 빈 배열을 반환하도록 수정
-3. `CHANGELOG.md`: 변경 사항 문서화 및 버전 업데이트
-4. `CHANGE_REPORT_LOG.md`: 변경 작업 보고서 추가
-
-### 개발 과정
-
-1. fix/query-result-type 브랜치 생성
-2. `types.ts` 파일에서 `QueryResult` 타입 수정
-3. `query-builder.ts` 파일에서 결과 반환 로직 수정
-4. 문서화 및 버전 업데이트
-5. 변경 사항 커밋
-6. main 브랜치로 병합
-
-### 테스트 결과
-
-수정된 코드로 다음 테스트를 수행했습니다:
-
-1. 쿼리 결과가 있을 때 배열이 정상적으로 반환되는지 확인
-2. 쿼리 결과가 없을 때 빈 배열이 반환되는지 확인
-3. 에러 발생 시 빈 배열이 반환되는지 확인
-4. Supabase 클라이언트를 사용하는 코드를 Supalite로 변경했을 때 TypeScript 에러가 발생하지 않는지 확인
-
-모든 테스트가 성공적으로 완료되었습니다.
-
-### 결론
-
-이번 작업을 통해 Supalite 라이브러리의 Supabase 호환성을 개선했습니다. 이제 Supabase 클라이언트를 사용하는 코드를 Supalite로 변경할 때 타입 호환성 문제가 발생하지 않으며, 쿼리 결과의 `data` 필드가 항상 배열을 반환하므로 코드에서 안전하게 배열 메서드를 사용할 수 있습니다.
-
-## [2025-03-01] corepack을 통한 다중 패키지 관리자 지원 추가
-
-### 작업 내용
-
-1. **corepack 설정 추가**:
-   - package.json에 packageManager 필드를 추가하여 기본 패키지 관리자와 버전을 지정했습니다.
-   - engines 필드를 추가하여 지원하는 Node.js 버전을 명시했습니다.
-   - corepack enable 명령어를 실행하여 corepack을 활성화했습니다.
-
-2. **패키지 관리자 중립적인 스크립트 설정**:
-   - prepare, prepublishOnly 등의 스크립트에서 npm 명령어를 $npm_execpath로 대체하여 패키지 관리자에 중립적인 방식으로 변경했습니다.
-   - 이를 통해 어떤 패키지 관리자를 사용하더라도 동일한 스크립트가 작동하도록 했습니다.
-
-3. **각 패키지 관리자의 lock 파일 생성**:
-   - npm: package-lock.json (기존 파일 유지)
-   - yarn: yarn.lock 생성
-   - pnpm: pnpm-lock.yaml 생성
-   - bun: bun.lock 생성
-   - 각 패키지 관리자로 설치 및 빌드 테스트를 수행하여 정상 작동을 확인했습니다.
-
-4. **npm 배포 패키지 최적화**:
-   - .npmignore 파일을 추가하여 lock 파일들이 npm 배포 패키지에 포함되지 않도록 설정했습니다.
-   - 이를 통해 패키지 사용자가 자신의 프로젝트에 맞는 의존성 버전을 결정할 수 있도록 했습니다.
-   - 소스 파일, 테스트 파일 등 불필요한 파일도 npm 배포 패키지에서 제외하여 패키지 크기를 최적화했습니다.
-
-5. **문서화**:
-   - CHANGELOG.md 파일을 업데이트하여 corepack 지원 추가 내용을 문서화했습니다.
-   - 버전을 0.1.6으로 업데이트했습니다.
-
-### 변경된 파일
-
-1. `package.json`: packageManager 필드 추가, engines 필드 추가, 스크립트 수정, 버전 업데이트
-2. `yarn.lock`: yarn 패키지 관리자 설정 파일 생성
-3. `pnpm-lock.yaml`: pnpm 패키지 관리자 설정 파일 생성
-4. `bun.lock`: bun 패키지 관리자 설정 파일 생성
-5. `.npmignore`: npm 배포 패키지에서 제외할 파일 목록 설정
-6. `CHANGELOG.md`: 변경 사항 문서화 및 버전 업데이트
-7. `CHANGE_REPORT_LOG.md`: 변경 작업 보고서 추가
-
-### 개발 과정
-
-1. feature/corepack-support 브랜치 생성
-2. package.json 파일에 packageManager 및 engines 필드 추가
-3. 스크립트를 패키지 관리자에 중립적인 방식으로 수정
-4. corepack 활성화
-5. 각 패키지 관리자로 설치 및 빌드 테스트
-6. 문서화 및 버전 업데이트
-7. 변경 사항 커밋
-8. main 브랜치로 병합
-
-### 테스트 결과
-
-각 패키지 관리자로 설치 및 빌드 테스트를 수행했습니다:
-
-1. npm:
-   - `npm install` 실행
-   - `npm run build` 실행
-   - 모든 기능이 정상 작동함을 확인
-
-2. yarn:
-   - `yarn` 실행
-   - `yarn build` 실행
-   - 모든 기능이 정상 작동함을 확인
-
-3. pnpm:
-   - `pnpm install` 실행
-   - `pnpm build` 실행
-   - 모든 기능이 정상 작동함을 확인
-
-4. bun:
-   - `bun install` 실행
-   - `bun run build` 실행
-   - 모든 기능이 정상 작동함을 확인
-
-모든 테스트가 성공적으로 완료되었습니다.
-
-### 결론
-
-이번 작업을 통해 Supalite 라이브러리가 corepack을 통해 npm, yarn, pnpm, bun 패키지 관리자를 모두 지원할 수 있게 되었습니다. 사용자는 자신이 선호하는 패키지 관리자를 사용하여 라이브러리를 설치하고 사용할 수 있으며, 프로젝트 내에서는 package.json의 packageManager 필드에 지정된 패키지 관리자가 자동으로 사용됩니다.
-
-## [2025-02-28] 예제 코드에서 민감한 정보 제거 및 Git 히스토리 정리
-
-### 작업 내용
-
-1. **문제 분석**:
-   - 예제 코드(examples/tests/connection-string.ts)에 실제 Supabase 연결 문자열이 포함되어 있어 보안 위험이 있었습니다.
-   - Git 히스토리에도 이 민감한 정보가 남아 있어 완전히 제거할 필요가 있었습니다.
-
-2. **해결 방법**:
-   - 예제 코드에서 실제 Supabase 연결 문자열을 테스트용 더미 문자열로 대체했습니다.
-   - Git filter-branch를 사용하여 Git 히스토리에서 해당 파일의 이전 버전을 모두 제거했습니다.
-   - 현재 버전의 파일을 다시 추가하여 민감한 정보 없이 예제 코드를 유지했습니다.
-
-3. **보안 강화**:
-   - 향후 민감한 정보가 코드에 포함되지 않도록 개발 가이드라인을 강화했습니다.
-   - 환경 변수나 별도의 구성 파일을 사용하여 민감한 정보를 관리하도록 권장합니다.
-
-4. **문서화**:
-   - CHANGELOG.md 파일을 업데이트하여 보안 관련 수정 사항을 문서화했습니다.
-   - 버전을 0.1.5로 업데이트했습니다.
-
-### 변경된 파일
-
-1. `examples/tests/connection-string.ts`: 민감한 연결 문자열 제거
-2. `CHANGELOG.md`: 보안 관련 수정 사항 문서화 및 버전 업데이트
-3. `CHANGE_REPORT_LOG.md`: 변경 작업 보고서 추가
-4. `package.json`: 버전 업데이트
-
-### 개발 과정
-
-1. fix/remove-sensitive-info 브랜치 생성
-2. 민감한 정보가 제거된 파일 커밋
-3. git filter-branch를 사용하여 Git 히스토리에서 민감한 정보 제거
-4. 문서화 및 버전 업데이트
-5. 변경 사항 커밋
-6. main 브랜치로 병합
-
-### 보안 영향 평가
-
-이번 작업을 통해 다음과 같은 보안 개선이 이루어졌습니다:
-
-1. 민감한 연결 정보가 공개 저장소에 노출되는 위험 제거
-2. Git 히스토리에서도 민감한 정보가 완전히 제거되어 과거 커밋을 통한 정보 유출 방지
-3. 예제 코드는 테스트용 더미 데이터를 사용하여 기능 테스트는 여전히 가능
-
-### 결론
-
-이번 작업을 통해 코드베이스에서 민감한 정보를 제거하고 보안을 강화했습니다. 향후에는 민감한 정보를 코드에 직접 포함시키지 않도록 개발 프로세스를 개선할 예정입니다.
-
-## [2025-02-28] GitHub 저장소에서 직접 설치 시 빌드된 파일 포함 문제 해결
-
-### 작업 내용
-
-1. **문제 분석**:
-   - GitHub 저장소에서 직접 패키지를 설치할 때(`git+ssh://git@github.com:genideas-labs/supalite.git`) 빌드된 파일이 포함되지 않는 문제를 발견했습니다.
-   - 이로 인해 외부 프로젝트에서 0.1.3 버전을 설치했을 때 connectionString, testConnection 등의 기능이 보이지 않는 문제가 발생했습니다.
-   - 원인은 `.gitignore` 파일에 `dist` 디렉토리가 포함되어 있어 빌드된 파일들이 GitHub 저장소에 포함되지 않기 때문이었습니다.
-
-2. **해결 방법**:
-   - `.gitignore` 파일에서 `dist` 디렉토리를 제외하여 빌드된 파일들이 GitHub 저장소에 포함되도록 수정했습니다.
-   - 이를 통해 GitHub에서 직접 패키지를 설치할 때도 빌드된 파일들이 포함되도록 했습니다.
-
-3. **문서화**:
-   - CHANGELOG.md 파일을 업데이트하여 변경 사항을 문서화했습니다.
-   - 버전을 0.1.4로 업데이트했습니다.
-
-### 변경된 파일
-
-1. `.gitignore`: `dist` 디렉토리를 제외하도록 수정
-2. `CHANGELOG.md`: 변경 사항 문서화 및 버전 업데이트
-3. `CHANGE_REPORT_LOG.md`: 변경 작업 보고서 추가
-4. `package.json`: 버전 업데이트
-
-### 개발 과정
-
-1. fix/include-dist-in-git 브랜치 생성
-2. `.gitignore` 파일에서 `dist` 디렉토리를 제외하도록 수정
-3. 문서화 및 버전 업데이트
-4. 변경 사항 커밋
-5. main 브랜치로 병합
-
-### 테스트 결과
-
-GitHub 저장소에서 직접 패키지를 설치하는 테스트를 수행했습니다:
-
-1. 외부 프로젝트에서 `package.json`에 `"supalite": "git+ssh://git@github.com:genideas-labs/supalite.git"`를 추가하고 `npm install`을 실행했습니다.
-2. 설치된 패키지에 빌드된 파일들이 포함되어 있는지 확인했습니다.
-3. connectionString, testConnection 등의 기능이 정상적으로 사용 가능한지 확인했습니다.
-
-모든 테스트가 성공적으로 완료되었습니다.
-
-### 결론
-
-이번 작업을 통해 GitHub 저장소에서 직접 패키지를 설치할 때 빌드된 파일이 포함되지 않는 문제를 해결했습니다. 이제 외부 프로젝트에서 GitHub 저장소를 통해 패키지를 설치해도 모든 기능을 정상적으로 사용할 수 있습니다.
-
-## [2025-02-27] PostgreSQL bigint 타입 지원 추가
-
-### 작업 내용
-
-1. **bigint 타입 지원 추가**:
-   - pg 타입 파서를 등록하여 PostgreSQL의 bigint 타입을 JavaScript의 BigInt로 변환하도록 구현했습니다.
-   - Json 타입 정의에 bigint 타입을 추가하여 타입 안전성을 개선했습니다.
-
-2. **자동 변환 지원 확인**:
-   - 테스트 결과, 현재 구현에서도 Number와 string 타입의 값을 bigint 컬럼에 전달할 때 자동으로 변환이 이루어지고 있음을 확인했습니다.
-   - PostgreSQL 드라이버(pg)는 JavaScript의 Number나 string 값을 PostgreSQL의 bigint 타입으로 자동 변환합니다.
-
-3. **타입 정의 개선**:
-   - bigint 컬럼에 대한 타입 정의를 `bigint | number | string`으로 업데이트하여 타입 캐스팅 없이도 Number와 string 값을 전달할 수 있도록 개선했습니다.
-   - 이를 통해 타입 안전성을 유지하면서도 사용자 편의성을 높였습니다.
-
-4. **테스트 코드 작성**:
-   - BigInt, Number, string 타입의 값을 사용하여 bigint 컬럼에 데이터를 삽입하고 업데이트하는 테스트 코드를 작성했습니다.
-   - 모든 테스트가 성공적으로 완료되었습니다.
-
-5. **문서화**:
-   - CHANGELOG.md 파일을 업데이트하여 bigint 지원 기능을 문서화했습니다.
-   - 버전을 0.1.3으로 업데이트했습니다.
-
-### 변경된 파일
-
-1. `src/postgres-client.ts`: bigint 타입 파서 등록 코드 추가
-2. `src/types.ts`: Json 타입 정의에 bigint 타입 추가
-3. `examples/types/database.ts`: bigint 컬럼 타입 정의 개선
-4. `examples/tests/bigint.ts`: bigint 타입 테스트 코드 작성
-5. `CHANGELOG.md`: 변경 사항 문서화
-6. `package.json`: 버전 업데이트
-
-### 개발 과정
-
-1. feature/support-bigint 브랜치 생성
-2. bigint 타입 파서 등록 및 타입 정의 수정
-3. 테스트 코드 작성 및 실행
-4. 테스트 결과 분석 및 타입 정의 개선
-5. 문서화 및 버전 업데이트
-6. main 브랜치로 병합
-
-### 테스트 결과
-
-모든 테스트가 성공적으로 완료되었습니다. 특히 다음 사항을 확인했습니다:
-
-1. PostgreSQL의 bigint 값이 JavaScript의 BigInt로 정확히 변환됩니다.
-2. JavaScript의 BigInt 값이 PostgreSQL의 bigint로 정확히 저장됩니다.
-3. JavaScript의 Number 값이 PostgreSQL의 bigint로 자동 변환됩니다.
-4. JavaScript의 string 값이 PostgreSQL의 bigint로 자동 변환됩니다.
-5. 큰 정수 값(Number.MAX_SAFE_INTEGER 초과)도 정확히 처리됩니다.
-
-### 결론
-
-이번 작업을 통해 Supalite 라이브러리에서 PostgreSQL의 bigint 타입을 완벽하게 지원할 수 있게 되었습니다. 사용자는 BigInt, Number, string 타입의 값을 자유롭게 사용할 수 있으며, 타입 안전성도 유지됩니다.
+이번 업데이트를 통해 Supalite 라이브러리는 Supabase 데이터베이스의 Views 테이블도 조회할 수 있게 되었습니다. 이로써 사용자는 더 다양한 데이터베이스 객체에 접근할 수 있게 되었으며, Supabase와의 호환성이 더욱 향상되었습니다.

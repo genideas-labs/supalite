@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import { PostgresError } from './errors';
 import {
   TableName,
+  TableOrViewName,
   QueryType,
   QueryOptions,
   FilterOptions,
@@ -17,7 +18,7 @@ import {
 export class QueryBuilder<
   T extends DatabaseSchema,
   S extends SchemaName<T> = 'public',
-  K extends TableName<T, S> = TableName<T, S>
+  K extends TableOrViewName<T, S> = TableOrViewName<T, S>
 > implements Promise<QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>>> {
   readonly [Symbol.toStringTag] = 'QueryBuilder';
   private table: K;

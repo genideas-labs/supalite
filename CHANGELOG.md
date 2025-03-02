@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.12] - 2025-03-02
+
+### Added
+- Views 테이블 조회 기능 추가
+- TableOrViewName 타입 추가로 Tables와 Views 모두 지원
+- View 테이블 조회 예제 코드 추가
+- View 테이블 테스트를 위한 SQL 스크립트 추가
+
 ## [0.1.11] - 2025-03-02
 
 ### Fixed
