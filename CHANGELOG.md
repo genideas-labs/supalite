@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.7] - 2025-03-04
+
+### Added
+- QueryBuilder에 `match` 메서드 추가
+- `match` 메서드 테스트 코드 작성
+
 ## [0.1.6] - 2025-03-01
 
 ### Added

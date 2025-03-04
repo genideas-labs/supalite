@@ -27,6 +27,9 @@ export declare class QueryBuilder<T extends DatabaseSchema, S extends SchemaName
         count?: 'exact' | 'planned' | 'estimated';
         head?: boolean;
     }): this;
+    match(conditions: {
+        [key: string]: any;
+    }): this;
     eq(column: string, value: any): this;
     neq(column: string, value: any): this;
     is(column: string, value: any): this;

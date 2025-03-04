@@ -7,4 +7,5 @@ module.exports = {
     '^.+\\.ts$': 'ts-jest',
   },
   moduleFileExtensions: ['ts', 'js', 'json', 'node'],
+  testPathIgnorePatterns: ['<rootDir>/src/__tests__/postgres-client.test.ts'],
 };

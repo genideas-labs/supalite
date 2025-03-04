@@ -32,6 +32,13 @@ class QueryBuilder {
         this.headOption = options?.head;
         return this;
     }
+    match(conditions) {
+        for (const key in conditions) {
+            this.whereConditions.push(`"${key}" = $${this.whereValues.length + 1}`);
+            this.whereValues.push(conditions[key]);
+        }
+        return this;
+    }
     eq(column, value) {
         this.whereConditions.push(`"${column}" = $${this.whereValues.length + 1}`);
         this.whereValues.push(value);
