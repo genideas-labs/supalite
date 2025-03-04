@@ -84,7 +84,8 @@ class QueryBuilder {
         this.whereValues.push(value);
         return this;
     }
-    order(column, { ascending = true }) {
+    order(column, options) {
+        const ascending = options?.ascending !== false; // undefined나 true면 오름차순, false만 내림차순
         this.orderByColumns.push(`"${column}" ${ascending ? 'ASC' : 'DESC'}`);
         return this;
     }
@@ -292,7 +293,7 @@ class QueryBuilder {
             }
             if (this.queryType === 'INSERT' && !this.shouldReturnData()) {
                 return {
-                    data: null,
+                    data: [],
                     error: null,
                     count: result.rowCount,
                     status: 201,
@@ -327,7 +328,7 @@ class QueryBuilder {
                 };
             }
             return {
-                data: result.rows.length > 0 ? result.rows : null,
+                data: result.rows.length > 0 ? result.rows : [],
                 error: null,
                 count: result.rowCount,
                 status: 200,
@@ -336,7 +337,7 @@ class QueryBuilder {
         }
         catch (err) {
             return {
-                data: null,
+                data: [],
                 error: new errors_1.PostgresError(err.message),
                 count: null,
                 status: 500,

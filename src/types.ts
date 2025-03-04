@@ -41,26 +41,44 @@ export type TableName<
   S extends SchemaName<T> = SchemaName<T>
 > = keyof T[S]['Tables'];
 
+export type ViewName<
+  T extends DatabaseSchema,
+  S extends SchemaName<T> = SchemaName<T>
+> = keyof NonNullable<T[S]['Views']>;
+
+export type TableOrViewName<
+  T extends DatabaseSchema,
+  S extends SchemaName<T> = SchemaName<T>
+> = TableName<T, S> | ViewName<T, S>;
+
 export type Row<
   T extends DatabaseSchema,
   S extends SchemaName<T>,
-  K extends TableName<T, S>
-> = T[S]['Tables'][K]['Row'];
+  K extends TableOrViewName<T, S>
+> = K extends TableName<T, S> 
+  ? T[S]['Tables'][K]['Row'] 
+  : K extends ViewName<T, S> 
+    ? NonNullable<T[S]['Views']>[K]['Row'] 
+    : never;
 
 export type InsertRow<
   T extends DatabaseSchema,
   S extends SchemaName<T>,
-  K extends TableName<T, S>
-> = T[S]['Tables'][K]['Insert'];
+  K extends TableOrViewName<T, S>
+> = K extends TableName<T, S> 
+  ? T[S]['Tables'][K]['Insert'] 
+  : never; // Views는 Insert 불가능
 
 export type UpdateRow<
   T extends DatabaseSchema,
   S extends SchemaName<T>,
-  K extends TableName<T, S>
-> = T[S]['Tables'][K]['Update'] & {
-  modified_at?: string;
-  updated_at?: string;
-};
+  K extends TableOrViewName<T, S>
+> = K extends TableName<T, S> 
+  ? T[S]['Tables'][K]['Update'] & {
+      modified_at?: string | null;
+      updated_at?: string | null;
+    }
+  : never; // Views는 Update 불가능
 
 export type EnumType<
   T extends DatabaseSchema,
@@ -105,7 +123,7 @@ export type BaseResult = {
 };
 
 export type QueryResult<T = any> = BaseResult & {
-  data: T[] | null;
+  data: Array<T>;  // T[] 대신 Array<T>를 사용하여 명시적으로 배열임을 강조
 };
 
 export type SingleQueryResult<T = any> = BaseResult & {

@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
-import { TableName, QueryResult, SingleQueryResult, DatabaseSchema, SchemaName, Row, InsertRow, UpdateRow } from './types';
-export declare class QueryBuilder<T extends DatabaseSchema, S extends SchemaName<T> = 'public', K extends TableName<T, S> = TableName<T, S>> implements Promise<QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>>> {
+import { TableName, TableOrViewName, QueryResult, SingleQueryResult, DatabaseSchema, SchemaName, Row, InsertRow, UpdateRow } from './types';
+export declare class QueryBuilder<T extends DatabaseSchema, S extends SchemaName<T> = 'public', K extends TableOrViewName<T, S> = TableOrViewName<T, S>> implements Promise<QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>>> {
     private pool;
     readonly [Symbol.toStringTag] = "QueryBuilder";
     private table;
@@ -37,8 +37,8 @@ export declare class QueryBuilder<T extends DatabaseSchema, S extends SchemaName
     in(column: string, values: any[]): this;
     gte(column: string, value: any): this;
     lte(column: string, value: any): this;
-    order(column: string, { ascending }: {
-        ascending: boolean;
+    order(column: string, options?: {
+        ascending?: boolean;
     }): this;
     limit(value: number): this;
     offset(value: number): this;

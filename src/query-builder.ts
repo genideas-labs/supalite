@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import { PostgresError } from './errors';
 import {
   TableName,
+  TableOrViewName,
   QueryType,
   QueryOptions,
   FilterOptions,
@@ -17,7 +18,7 @@ import {
 export class QueryBuilder<
   T extends DatabaseSchema,
   S extends SchemaName<T> = 'public',
-  K extends TableName<T, S> = TableName<T, S>
+  K extends TableOrViewName<T, S> = TableOrViewName<T, S>
 > implements Promise<QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>>> {
   readonly [Symbol.toStringTag] = 'QueryBuilder';
   private table: K;
@@ -131,7 +132,8 @@ export class QueryBuilder<
     return this;
   }
 
-  order(column: string, { ascending = true }: { ascending: boolean }): this {
+  order(column: string, options?: { ascending?: boolean }): this {
+    const ascending = options?.ascending !== false; // undefined나 true면 오름차순, false만 내림차순
     this.orderByColumns.push(`"${column}" ${ascending ? 'ASC' : 'DESC'}`);
     return this;
   }
@@ -381,12 +383,12 @@ export class QueryBuilder<
 
       if (this.queryType === 'INSERT' && !this.shouldReturnData()) {
         return {
-          data: null,
+          data: [],
           error: null,
           count: result.rowCount,
           status: 201,
           statusText: 'Created',
-        };
+        } as QueryResult<Row<T, S, K>>;
       }
 
       if (this.isSingleResult) {
@@ -420,7 +422,7 @@ export class QueryBuilder<
       }
 
       return {
-        data: result.rows.length > 0 ? result.rows : null,
+        data: result.rows.length > 0 ? result.rows : [],
         error: null,
         count: result.rowCount,
         status: 200,
@@ -428,12 +430,12 @@ export class QueryBuilder<
       } as QueryResult<Row<T, S, K>>;
     } catch (err: any) {
       return {
-        data: null,
+        data: [],
         error: new PostgresError(err.message),
         count: null,
         status: 500,
         statusText: 'Internal Server Error',
-      };
+      } as QueryResult<Row<T, S, K>>;
     }
   }
 

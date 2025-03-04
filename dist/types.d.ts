@@ -35,12 +35,14 @@ export type AsDatabaseSchema<T> = {
 };
 export type SchemaName<T extends DatabaseSchema> = keyof T;
 export type TableName<T extends DatabaseSchema, S extends SchemaName<T> = SchemaName<T>> = keyof T[S]['Tables'];
-export type Row<T extends DatabaseSchema, S extends SchemaName<T>, K extends TableName<T, S>> = T[S]['Tables'][K]['Row'];
-export type InsertRow<T extends DatabaseSchema, S extends SchemaName<T>, K extends TableName<T, S>> = T[S]['Tables'][K]['Insert'];
-export type UpdateRow<T extends DatabaseSchema, S extends SchemaName<T>, K extends TableName<T, S>> = T[S]['Tables'][K]['Update'] & {
-    modified_at?: string;
-    updated_at?: string;
-};
+export type ViewName<T extends DatabaseSchema, S extends SchemaName<T> = SchemaName<T>> = keyof NonNullable<T[S]['Views']>;
+export type TableOrViewName<T extends DatabaseSchema, S extends SchemaName<T> = SchemaName<T>> = TableName<T, S> | ViewName<T, S>;
+export type Row<T extends DatabaseSchema, S extends SchemaName<T>, K extends TableOrViewName<T, S>> = K extends TableName<T, S> ? T[S]['Tables'][K]['Row'] : K extends ViewName<T, S> ? NonNullable<T[S]['Views']>[K]['Row'] : never;
+export type InsertRow<T extends DatabaseSchema, S extends SchemaName<T>, K extends TableOrViewName<T, S>> = K extends TableName<T, S> ? T[S]['Tables'][K]['Insert'] : never;
+export type UpdateRow<T extends DatabaseSchema, S extends SchemaName<T>, K extends TableOrViewName<T, S>> = K extends TableName<T, S> ? T[S]['Tables'][K]['Update'] & {
+    modified_at?: string | null;
+    updated_at?: string | null;
+} : never;
 export type EnumType<T extends DatabaseSchema, S extends SchemaName<T>, E extends keyof NonNullable<T[S]['Enums']>> = NonNullable<T[S]['Enums']>[E];
 export interface SupaliteConfig {
     connectionString?: string;
@@ -74,7 +76,7 @@ export type BaseResult = {
     statusCode?: number;
 };
 export type QueryResult<T = any> = BaseResult & {
-    data: T[] | null;
+    data: Array<T>;
 };
 export type SingleQueryResult<T = any> = BaseResult & {
     data: T | null;
