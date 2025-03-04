@@ -1,5 +1,5 @@
 import { SupaLitePG } from '../../src/postgres-client';
-import { insertIntoTestTable, getFromTestTable } from '../../src/test-table';
+import { insertIntoTestTable, getFromTestTable } from '../test-table';
 import { config } from 'dotenv';
 
 config();
