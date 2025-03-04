@@ -72,6 +72,14 @@ export class QueryBuilder<
     return this;
   }
 
+  match(conditions: { [key: string]: any }): this {
+    for (const key in conditions) {
+      this.whereConditions.push(`"${key}" = $${this.whereValues.length + 1}`);
+      this.whereValues.push(conditions[key]);
+    }
+    return this;
+  }
+
   eq(column: string, value: any): this {
     this.whereConditions.push(`"${column}" = $${this.whereValues.length + 1}`);
     this.whereValues.push(value);
