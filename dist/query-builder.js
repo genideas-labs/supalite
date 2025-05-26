@@ -12,7 +12,7 @@ class QueryBuilder {
         this.orConditions = [];
         this.orderByColumns = [];
         this.whereValues = [];
-        this.isSingleResult = false;
+        this.singleMode = null;
         this.queryType = 'SELECT';
         this.table = table;
         this.schema = schema;
@@ -97,8 +97,12 @@ class QueryBuilder {
         this.offsetValue = value;
         return this;
     }
+    maybeSingle() {
+        this.singleMode = 'maybe';
+        return this.execute();
+    }
     single() {
-        this.isSingleResult = true;
+        this.singleMode = 'strict';
         return this.execute();
     }
     ilike(column, pattern) {
@@ -203,7 +207,7 @@ class QueryBuilder {
                 values = [...this.whereValues];
                 break;
             case 'INSERT':
-            case 'UPSERT':
+            case 'UPSERT': {
                 if (!this.insertData)
                     throw new Error('No data provided for insert/upsert');
                 if (Array.isArray(this.insertData)) {
@@ -230,7 +234,8 @@ class QueryBuilder {
                 }
                 query += returning;
                 break;
-            case 'UPDATE':
+            }
+            case 'UPDATE': {
                 if (!this.updateData)
                     throw new Error('No data provided for update');
                 const updateData = { ...this.updateData };
@@ -248,12 +253,14 @@ class QueryBuilder {
                 query += this.buildWhereClause(updateValues);
                 query += returning;
                 break;
-            case 'DELETE':
+            }
+            case 'DELETE': {
                 query = `DELETE FROM ${schemaTable}`;
                 values = [...this.whereValues];
                 query += this.buildWhereClause();
                 query += returning;
                 break;
+            }
         }
         if (this.queryType === 'SELECT') {
             query += this.buildWhereClause();
@@ -300,17 +307,27 @@ class QueryBuilder {
                     statusText: 'Created',
                 };
             }
-            if (this.isSingleResult) {
+            if (this.singleMode) {
                 if (result.rows.length > 1) {
                     return {
                         data: null,
-                        error: new errors_1.PostgresError('Multiple rows returned in single result query'),
+                        error: new errors_1.PostgresError('PGRST114: Multiple rows returned'), // PGRST114: More than one row was returned
                         count: result.rowCount,
-                        status: 406,
-                        statusText: 'Not Acceptable',
+                        status: 406, // Not Acceptable
+                        statusText: 'Not Acceptable. Expected a single row but found multiple.',
                     };
                 }
                 if (result.rows.length === 0) {
+                    if (this.singleMode === 'strict') {
+                        return {
+                            data: null,
+                            error: new errors_1.PostgresError('PGRST116: No rows found'), // PGRST116: Not found
+                            count: 0,
+                            status: 404, // Not Found (more appropriate than 200 for strict single when not found)
+                            statusText: 'Not Found. Expected a single row but found no rows.',
+                        };
+                    }
+                    // this.singleMode === 'maybe'
                     return {
                         data: null,
                         error: null,
@@ -319,6 +336,7 @@ class QueryBuilder {
                         statusText: 'OK',
                     };
                 }
+                // result.rows.length === 1
                 return {
                     data: result.rows[0],
                     error: null,

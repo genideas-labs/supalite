@@ -14,7 +14,7 @@ export declare class QueryBuilder<T extends DatabaseSchema, S extends SchemaName
     private limitValue?;
     private offsetValue?;
     private whereValues;
-    private isSingleResult;
+    private singleMode;
     private queryType;
     private insertData?;
     private updateData?;
@@ -42,6 +42,7 @@ export declare class QueryBuilder<T extends DatabaseSchema, S extends SchemaName
     }): this;
     limit(value: number): this;
     offset(value: number): this;
+    maybeSingle(): Promise<SingleQueryResult<Row<T, S, K>>>;
     single(): Promise<SingleQueryResult<Row<T, S, K>>>;
     ilike(column: string, pattern: string): this;
     or(conditions: string): this;

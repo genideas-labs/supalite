@@ -1,6 +1,6 @@
 # SupaLite
 
-[![npm version](https://img.shields.io/badge/version-0.1.1-blue.svg)](https://www.npmjs.com/package/supalite)
+[![npm version](https://img.shields.io/badge/version-0.2.1-blue.svg)](https://www.npmjs.com/package/supalite)
 
 가볍고 효율적인 PostgreSQL 클라이언트 라이브러리입니다. Supabase와 동일한 API를 제공하면서도 더 가볍고 빠른 구현을 제공합니다.
 
