@@ -267,7 +267,8 @@ const { data, error } = await client
 - `limit(count: number)`: 결과 개수 제한
 - `offset(count: number)`: 결과 시작 위치
 - `range(from: number, to: number)`: 범위 지정
-- `single()`: 단일 결과 반환
+- `single()`: 단일 결과 반환 (결과 없을 시 에러)
+- `maybeSingle()`: 단일 결과 반환 (결과 없을 시 data: null, error: null)
 - `returns<T>()`: 반환 타입 지정
 
 ### 트랜잭션 메소드

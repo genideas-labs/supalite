@@ -4,8 +4,6 @@ import {
   TableName,
   TableOrViewName,
   QueryType,
-  QueryOptions,
-  FilterOptions,
   QueryResult,
   SingleQueryResult,
   DatabaseSchema,
@@ -32,7 +30,7 @@ export class QueryBuilder<
   private limitValue?: number;
   private offsetValue?: number;
   private whereValues: any[] = [];
-  private isSingleResult: boolean = false;
+  private singleMode: 'strict' | 'maybe' | null = null;
   private queryType: QueryType = 'SELECT';
   private insertData?: InsertRow<T, S, K> | InsertRow<T, S, K>[];
   private updateData?: UpdateRow<T, S, K>;
@@ -148,8 +146,13 @@ export class QueryBuilder<
     return this;
   }
 
+  maybeSingle(): Promise<SingleQueryResult<Row<T, S, K>>> {
+    this.singleMode = 'maybe';
+    return this.execute() as Promise<SingleQueryResult<Row<T, S, K>>>;
+  }
+
   single(): Promise<SingleQueryResult<Row<T, S, K>>> {
-    this.isSingleResult = true;
+    this.singleMode = 'strict';
     return this.execute() as Promise<SingleQueryResult<Row<T, S, K>>>;
   }
 
@@ -275,7 +278,7 @@ export class QueryBuilder<
         break;
 
       case 'INSERT':
-      case 'UPSERT':
+      case 'UPSERT': {
         if (!this.insertData) throw new Error('No data provided for insert/upsert');
         
         if (Array.isArray(this.insertData)) {
@@ -306,8 +309,8 @@ export class QueryBuilder<
         
         query += returning;
         break;
-
-      case 'UPDATE':
+      }
+      case 'UPDATE': {
         if (!this.updateData) throw new Error('No data provided for update');
         const updateData = { ...this.updateData } as Record<string, unknown>;
 
@@ -328,13 +331,14 @@ export class QueryBuilder<
         query += this.buildWhereClause(updateValues);
         query += returning;
         break;
-
-      case 'DELETE':
+      }
+      case 'DELETE': {
         query = `DELETE FROM ${schemaTable}`;
         values = [...this.whereValues];
         query += this.buildWhereClause();
         query += returning;
         break;
+      }
     }
 
     if (this.queryType === 'SELECT') {
@@ -391,18 +395,28 @@ export class QueryBuilder<
         } as QueryResult<Row<T, S, K>>;
       }
 
-      if (this.isSingleResult) {
+      if (this.singleMode) {
         if (result.rows.length > 1) {
           return {
             data: null,
-            error: new PostgresError('Multiple rows returned in single result query'),
+            error: new PostgresError('PGRST114: Multiple rows returned'), // PGRST114: More than one row was returned
             count: result.rowCount,
-            status: 406,
-            statusText: 'Not Acceptable',
+            status: 406, // Not Acceptable
+            statusText: 'Not Acceptable. Expected a single row but found multiple.',
           };
         }
 
         if (result.rows.length === 0) {
+          if (this.singleMode === 'strict') {
+            return {
+              data: null,
+              error: new PostgresError('PGRST116: No rows found'), // PGRST116: Not found
+              count: 0,
+              status: 404, // Not Found (more appropriate than 200 for strict single when not found)
+              statusText: 'Not Found. Expected a single row but found no rows.',
+            };
+          }
+          // this.singleMode === 'maybe'
           return {
             data: null,
             error: null,
@@ -411,7 +425,7 @@ export class QueryBuilder<
             statusText: 'OK',
           };
         }
-
+        // result.rows.length === 1
         return {
           data: result.rows[0],
           error: null,
