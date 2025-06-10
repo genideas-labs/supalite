@@ -3,7 +3,7 @@ import { PostgresError } from './errors';
 export type Json =
   | string
   | number
-  | bigint  // BigInt 타입 추가
+  | bigint  // BigInt 타입 추가. JSON.stringify 시 사용자 처리 필요.
   | boolean
   | null
   | { [key: string]: Json | undefined }
@@ -86,8 +86,11 @@ export type EnumType<
   E extends keyof NonNullable<T[S]['Enums']>
 > = NonNullable<T[S]['Enums']>[E];
 
+export type BigintTransformType = 'bigint' | 'string' | 'number';
+
 export interface SupaliteConfig {
   connectionString?: string; // 연결 문자열(URI) 지원
+  bigintTransform?: BigintTransformType; // BIGINT 변환 방식
   user?: string;
   host?: string;
   database?: string;

@@ -40,7 +40,9 @@ const client = new SupaLitePG<Database>({
   host: 'localhost',
   database: 'testdb',
   port: 5432,
-  ssl: false
+  ssl: false,
+  // bigintTransform: 'string', // BIGINT 타입을 문자열로 받기 (기본값: 'bigint')
+  // verbose: true // 상세 로그 출력
 });
 
 // 또는 환경 변수 사용
@@ -104,7 +106,9 @@ const client = new SupaLitePG<Database>({
   host: 'localhost',
   database: 'testdb',
   port: 5432,
-  ssl: false
+  ssl: false,
+  // bigintTransform: 'string', // BIGINT 타입을 문자열로 받기 (기본값: 'bigint')
+  // verbose: true // 상세 로그 출력
 });
 ```
 
@@ -312,7 +316,30 @@ DB_NAME=your_db_name
 DB_PASS=your_db_password
 DB_PORT=5432
 DB_SSL=true
+# SUPALITE_VERBOSE=true # 상세 로그 출력 활성화
 ```
+
+### SupaLitePG 생성자 옵션
+
+`SupaLitePG` 생성자는 다음 옵션을 받을 수 있습니다:
+
+- `connectionString?: string`: PostgreSQL 연결 문자열 (예: `postgresql://user:password@host:port/database`). 제공되면 다른 연결 매개변수보다 우선합니다.
+- `user?: string`: 데이터베이스 사용자 이름 (환경 변수: `DB_USER`).
+- `host?: string`: 데이터베이스 호스트 (환경 변수: `DB_HOST`).
+- `database?: string`: 데이터베이스 이름 (환경 변수: `DB_NAME`).
+- `password?: string`: 데이터베이스 비밀번호 (환경 변수: `DB_PASS`).
+- `port?: number`: 데이터베이스 포트 (기본값: 5432, 환경 변수: `DB_PORT`).
+- `ssl?: boolean`: SSL 연결 사용 여부 (기본값: `false`, 환경 변수: `DB_SSL`).
+- `schema?: string`: 기본 스키마 (기본값: `'public'`).
+- `verbose?: boolean`: 상세 로그 출력 여부 (기본값: `false`, 환경 변수: `SUPALITE_VERBOSE`).
+- `bigintTransform?: 'bigint' | 'string' | 'number'`:
+    - 데이터베이스의 `BIGINT` 타입을 어떻게 변환할지 지정합니다.
+    - `'bigint'` (기본값): JavaScript의 네이티브 `BigInt` 객체로 변환합니다. 이 라이브러리의 `Json` 타입은 `bigint`를 포함할 수 있도록 정의되어 있으나, 표준 `JSON.stringify()` 함수는 `BigInt`를 직접 처리하지 못하므로 `TypeError`가 발생할 수 있습니다. `BigInt` 값을 JSON으로 직렬화하려면 사용자 정의 replacer 함수를 사용하거나 사전에 문자열 등으로 변환해야 합니다.
+    - `'string'`: 문자열로 변환합니다. JSON 직렬화에 안전하며, `BigInt`의 전체 정밀도를 유지합니다.
+    - `'number'`: JavaScript의 `Number` 타입으로 변환합니다. 값이 `Number.MAX_SAFE_INTEGER` (또는 `Number.MIN_SAFE_INTEGER`)를 초과하면 정밀도 손실이 발생할 수 있습니다. 이 경우 `verbose: true` 설정 시 경고 로그가 출력됩니다. JSON 직렬화에는 안전합니다.
+
+### Json 타입과 BigInt
+라이브러리의 내부 `Json` 타입 정의는 `bigint`를 포함하여 TypeScript 코드 내에서 `BigInt` 값을 명시적으로 다룰 수 있도록 합니다. 그러나 `Json` 타입의 데이터를 표준 `JSON.stringify()`로 직렬화할 때, 포함된 `BigInt` 객체는 특별한 처리(예: 사용자 정의 replacer 함수 또는 사전 문자열 변환)가 필요합니다. `bigintTransform` 옵션을 `'string'` 또는 `'number'`로 설정하면 데이터베이스 조회 시점부터 JSON 직렬화에 안전한 형태로 `BIGINT` 값을 받을 수 있습니다.
 
 ## 응답 형식
 

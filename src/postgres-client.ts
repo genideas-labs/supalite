@@ -1,16 +1,13 @@
-import { Pool, types } from 'pg';
+import { Pool, types, PoolConfig } from 'pg'; // PoolConfig 추가
 import { QueryBuilder } from './query-builder';
 import { PostgresError } from './errors';
-import { TableOrViewName, SupaliteConfig, Row, QueryResult, SingleQueryResult } from './types'; // Removed unused imports: TableName, DatabaseSchema, SchemaName, AsDatabaseSchema
+import { TableOrViewName, SupaliteConfig, Row, QueryResult, SingleQueryResult, BigintTransformType } from './types'; // BigintTransformType 추가
 import { config as dotenvConfig } from 'dotenv';
 
 // .env 파일 로드
 dotenvConfig();
 
-// bigint 타입(OID: 20)을 JavaScript의 BigInt로 변환하는 파서 등록
-types.setTypeParser(20, function(val) {
-  return val === null ? null : BigInt(val);
-});
+// 타입 파서 설정은 생성자 내부로 이동
 
 type SchemaWithTables = {
   Tables: {
@@ -38,67 +35,88 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
   private schema: string;
   private schemaCache: Map<string, Map<string, string>> = new Map(); // schemaName.tableName -> Map<columnName, pgDataType>
   public verbose: boolean = false;
+  private bigintTransform: BigintTransformType;
 
   constructor(config?: SupaliteConfig) {
     this.verbose = config?.verbose || process.env.SUPALITE_VERBOSE === 'true' || false;
+    this.bigintTransform = config?.bigintTransform || 'bigint'; // 기본값 'bigint'
+
+    if (this.verbose) {
+      console.log(`[SupaLite VERBOSE] BIGINT transform mode set to: '${this.bigintTransform}'`);
+    }
+
+    // 타입 파서 설정
+    switch (this.bigintTransform) {
+      case 'string':
+        types.setTypeParser(20, (val: string | null) => val === null ? null : val); // pg는 이미 문자열로 줌
+        break;
+      case 'number':
+        types.setTypeParser(20, (val: string | null) => {
+          if (val === null) return null;
+          const num = Number(val);
+          if (this.verbose && (num > Number.MAX_SAFE_INTEGER || num < Number.MIN_SAFE_INTEGER)) {
+            console.warn(
+              `[SupaLite VERBOSE WARNING] BIGINT value ${val} converted to Number might lose precision. ` +
+              `Max safe integer is ${Number.MAX_SAFE_INTEGER}.`
+            );
+          }
+          return num;
+        });
+        break;
+      case 'bigint':
+      default: // 기본값 및 'bigint' 명시 시
+        types.setTypeParser(20, (val: string | null) => val === null ? null : BigInt(val));
+        break;
+    }
+    
+    let poolConfigOptions: PoolConfig = {};
+
     // connectionString이 제공되면 이를 우선 사용
     if (config?.connectionString || process.env.DB_CONNECTION) {
       try {
         const connectionString = config?.connectionString || process.env.DB_CONNECTION || '';
         
-        // 간단한 유효성 검사 (postgresql:// 로 시작하는지)
         if (!connectionString.startsWith('postgresql://')) {
           throw new Error('Invalid PostgreSQL connection string format. Must start with postgresql://');
         }
         
-        this.pool = new Pool({ 
-          connectionString,
-          ssl: config?.ssl !== undefined ? config.ssl : process.env.DB_SSL === 'true'
-        });
+        poolConfigOptions.connectionString = connectionString;
+        poolConfigOptions.ssl = config?.ssl !== undefined ? config.ssl : process.env.DB_SSL === 'true';
         
-        // 스키마 설정
-        this.schema = config?.schema || 'public';
+        if (this.verbose) {
+          console.log('[SupaLite VERBOSE] Database connection using connection string');
+        }
         
-        // 디버그용 로그
-        console.log('Database connection using connection string');
-        
-        // Error handling
-        this.pool.on('error', (err) => {
-          console.error('Unexpected error on idle client', err);
-          process.exit(-1);
-        });
-        
-        return;
       } catch (err: any) {
-        console.error('Database connection error:', err.message);
+        console.error('[SupaLite ERROR] Database connection error:', err.message);
         throw new Error(`Failed to establish database connection: ${err.message}`);
+      }
+    } else {
+      // 기존 코드: 개별 매개변수 사용
+      poolConfigOptions = {
+        user: config?.user || process.env.DB_USER,
+        host: config?.host || process.env.DB_HOST,
+        database: config?.database || process.env.DB_NAME,
+        password: config?.password || process.env.DB_PASS,
+        port: config?.port || Number(process.env.DB_PORT) || 5432,
+        ssl: config?.ssl !== undefined ? config.ssl : process.env.DB_SSL === 'true', // ssl 설정 명시적 처리
+      };
+      if (this.verbose) {
+        console.log('[SupaLite VERBOSE] Database connection using individual parameters:', {
+          ...poolConfigOptions,
+          password: '********'
+        });
       }
     }
     
-    // 기존 코드: 개별 매개변수 사용
-    const poolConfig = {
-      user: config?.user || process.env.DB_USER,
-      host: config?.host || process.env.DB_HOST,
-      database: config?.database || process.env.DB_NAME,
-      password: config?.password || process.env.DB_PASS,
-      port: config?.port || Number(process.env.DB_PORT) || 5432,
-      ssl: config?.ssl || process.env.DB_SSL === 'true',
-    };
-
+    this.pool = new Pool(poolConfigOptions);
     this.schema = config?.schema || 'public';
-
-    // 디버그용 로그 (비밀번호는 제외)
-    console.log('Database connection config:', {
-      ...poolConfig,
-      password: '********'
-    });
-
-    this.pool = new Pool(poolConfig);
 
     // Error handling
     this.pool.on('error', (err) => {
-      console.error('Unexpected error on idle client', err);
-      process.exit(-1);
+      console.error('[SupaLite ERROR] Unexpected error on idle client', err);
+      // Consider if process.exit is too drastic for a library. Maybe re-throw or emit an event.
+      // process.exit(-1); 
     });
   }
 
