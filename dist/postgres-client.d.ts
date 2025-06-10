@@ -26,6 +26,8 @@ export declare class SupaLitePG<T extends {
     private client;
     private isTransaction;
     private schema;
+    private schemaCache;
+    verbose: boolean;
     constructor(config?: SupaliteConfig);
     begin(): Promise<void>;
     commit(): Promise<void>;
@@ -37,6 +39,7 @@ export declare class SupaLitePG<T extends {
     from<S extends keyof T, K extends TableOrViewName<T, S>>(table: K, schema: S): QueryBuilder<T, S, K> & Promise<QueryResult<Row<T, S, K>>> & {
         single(): Promise<SingleQueryResult<Row<T, S, K>>>;
     };
+    getColumnPgType(dbSchema: string, tableName: string, columnName: string): Promise<string | undefined>;
     rpc(procedureName: string, params?: Record<string, any>): Promise<{
         data: any;
         error: PostgresError | null;

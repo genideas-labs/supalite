@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import type { SupaLitePG } from './postgres-client';
 import { TableName, TableOrViewName, QueryResult, SingleQueryResult, DatabaseSchema, SchemaName, Row, InsertRow, UpdateRow } from './types';
 export declare class QueryBuilder<T extends DatabaseSchema, S extends SchemaName<T> = 'public', K extends TableOrViewName<T, S> = TableOrViewName<T, S>> implements Promise<QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>>> {
     private pool;
@@ -19,7 +20,10 @@ export declare class QueryBuilder<T extends DatabaseSchema, S extends SchemaName
     private insertData?;
     private updateData?;
     private conflictTarget?;
-    constructor(pool: Pool, table: K, schema?: S);
+    private client;
+    private verbose;
+    constructor(pool: Pool, client: SupaLitePG<T>, // Accept SupaLitePG instance
+    table: K, schema?: S, verbose?: boolean);
     then<TResult1 = QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>>, TResult2 = never>(onfulfilled?: ((value: QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>>) => TResult1 | PromiseLike<TResult1>) | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null): Promise<TResult1 | TResult2>;
     catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null): Promise<QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>> | TResult>;
     finally(onfinally?: (() => void) | null): Promise<QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>>>;

@@ -53,6 +53,7 @@ export interface SupaliteConfig {
     port?: number;
     ssl?: boolean;
     schema?: string;
+    verbose?: boolean;
 }
 export type QueryType = 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'UPSERT';
 export interface QueryOptions {

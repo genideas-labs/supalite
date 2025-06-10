@@ -1,7 +1,7 @@
 import { Pool, types } from 'pg';
 import { QueryBuilder } from './query-builder';
 import { PostgresError } from './errors';
-import { TableName, TableOrViewName, SupaliteConfig, Row, DatabaseSchema, SchemaName, AsDatabaseSchema, QueryResult, SingleQueryResult } from './types';
+import { TableOrViewName, SupaliteConfig, Row, QueryResult, SingleQueryResult } from './types'; // Removed unused imports: TableName, DatabaseSchema, SchemaName, AsDatabaseSchema
 import { config as dotenvConfig } from 'dotenv';
 
 // .env 파일 로드
