@@ -15,7 +15,7 @@
 - 💪 트랜잭션 지원: Supabase에서 지원하지 않는 안전한 데이터베이스 트랜잭션 처리
 - 🎯 UPSERT 지원: 삽입/업데이트 동작 제어
 - 🔍 고급 필터링: OR 조건, ILIKE 검색 등 지원
-- 📚 배열 작업: 다중 레코드 삽입 및 배열 데이터 처리
+- 📚 배열 작업: 다중 레코드 삽입 및 배열 데이터 처리 (JSON/JSONB 필드 포함)
 - 🔄 Views, Functions, Enums 지원: Supabase 스타일의 완벽한 타입 지원
 
 ## 설치 방법
@@ -229,6 +229,15 @@ const { data, error } = await client
       content: '내용...'
     }
   ]);
+
+// JSONB 배열 데이터 처리
+const { data: jsonData, error: jsonError } = await client
+  .from('your_jsonb_table') // 'your_jsonb_table'을 실제 테이블명으로 변경
+  .insert({ 
+    metadata_array: ['tag1', 2025, { active: true }] 
+  })
+  .select('metadata_array')
+  .single();
 
 // 다른 스키마 사용
 const { data, error } = await client

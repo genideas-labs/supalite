@@ -16,12 +16,18 @@ type MultiRowTableRow = { id: number; group_key: string; value: string };
 type MultiRowTableInsert = { id?: number; group_key: string; value: string };
 type MultiRowTableUpdate = { id?: number; group_key?: string; value?: string };
 
+// Define Row/Insert/Update types for the new jsonb_test_table
+type JsonbTestTableRow = { id: number; jsonb_data: any[] | Record<string, any> | null };
+type JsonbTestTableInsert = { id?: number; jsonb_data?: any[] | Record<string, any> | null };
+type JsonbTestTableUpdate = { id?: number; jsonb_data?: any[] | Record<string, any> | null };
+
 // Define our test-specific database schema
 interface TestDatabase extends DatabaseSchema { // Ensures [schema: string]: SchemaDefinition
   public: { // This must be a SchemaDefinition
     Tables: {
       users: TableBase & { Row: UsersTableRow; Insert: UsersTableInsert; Update: UsersTableUpdate; Relationships: [] };
       test_table_for_multi_row: TableBase & { Row: MultiRowTableRow; Insert: MultiRowTableInsert; Update: MultiRowTableUpdate; Relationships: [] };
+      jsonb_test_table: TableBase & { Row: JsonbTestTableRow; Insert: JsonbTestTableInsert; Update: JsonbTestTableUpdate; Relationships: [] };
     };
     Views: Record<string, never>; // Conforms to SchemaDefinition['Views']
     Functions: Record<string, never>; // Conforms to SchemaDefinition['Functions']
@@ -83,6 +89,12 @@ describe('QueryBuilder single() and maybeSingle() methods', () => {
         value VARCHAR(100)
       );
     `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS jsonb_test_table (
+        id SERIAL PRIMARY KEY,
+        jsonb_data JSONB
+      );
+    `);
   });
 
   beforeEach(async () => {
@@ -96,6 +108,7 @@ describe('QueryBuilder single() and maybeSingle() methods', () => {
       await pool.query('DELETE FROM profiles;'); // Assuming 'profiles' table references 'users'
       await pool.query('DELETE FROM users;'); 
       await pool.query('DELETE FROM test_table_for_multi_row;');
+      await pool.query('DELETE FROM jsonb_test_table;');
 
       await pool.query(`
         INSERT INTO users (id, name, email, status) VALUES
@@ -121,6 +134,12 @@ describe('QueryBuilder single() and maybeSingle() methods', () => {
         group_key = EXCLUDED.group_key, value = EXCLUDED.value;
       `);
       // await pool.query(`SELECT setval(pg_get_serial_sequence('test_table_for_multi_row', 'id'), (SELECT MAX(id) FROM test_table_for_multi_row), true);`);
+
+      await pool.query(`
+        INSERT INTO jsonb_test_table (id, jsonb_data) VALUES
+        (1, '[]') -- Insert an empty array as JSONB
+        ON CONFLICT (id) DO UPDATE SET jsonb_data = EXCLUDED.jsonb_data;
+      `);
 
     } catch (err) {
       console.error('Error during beforeEach data setup:', err);
@@ -232,6 +251,32 @@ describe('QueryBuilder single() and maybeSingle() methods', () => {
       expect(error?.message).toContain('Multiple rows returned');
       expect(status).toBe(406);
       expect(statusText).toContain('Not Acceptable');
+    });
+  });
+
+  // Tests for JSONB field operations
+  describe('JSONB field operations', () => {
+    test('should insert and select an array in a JSONB field', async () => {
+      const testArray = ['string_value', 123, { nested_key: 'nested_value' }, null];
+      // Insert data
+      const { error: insertError } = await client
+        .from('jsonb_test_table')
+        .insert({ jsonb_data: JSON.stringify(testArray) as any, id: 2 }); // Use a new ID. Cast to any to satisfy type if needed.
+
+      expect(insertError).toBeNull();
+
+      // Select the inserted data
+      const { data, error: selectError, status } = await client
+        .from('jsonb_test_table')
+        .select('jsonb_data')
+        .eq('id', 2)
+        .single();
+      console.log('Selected JSONB data:', data);
+
+      expect(selectError).toBeNull();
+      expect(status).toBe(200);
+      expect(data).not.toBeNull();
+      expect(data?.jsonb_data).toEqual(testArray);
     });
   });
 });
