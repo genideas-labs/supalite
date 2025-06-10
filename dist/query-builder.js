@@ -225,6 +225,9 @@ class QueryBuilder {
                     insertColumns = Object.keys(rows[0]);
                     // Process each row for potential JSON stringification
                     const processedRowsValues = rows.map(row => Object.values(row).map(val => {
+                        if (typeof val === 'bigint') {
+                            return val.toString();
+                        }
                         if (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date))) {
                             return JSON.stringify(val);
                         }
@@ -238,6 +241,9 @@ class QueryBuilder {
                     const insertData = this.insertData;
                     insertColumns = Object.keys(insertData);
                     values = Object.values(insertData).map(val => {
+                        if (typeof val === 'bigint') {
+                            return val.toString();
+                        }
                         if (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date))) {
                             return JSON.stringify(val);
                         }
@@ -271,6 +277,9 @@ class QueryBuilder {
                     updateData.updated_at = now;
                 }
                 const processedUpdateValues = Object.values(updateData).map(val => {
+                    if (typeof val === 'bigint') {
+                        return val.toString();
+                    }
                     if (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date))) {
                         return JSON.stringify(val);
                     }
