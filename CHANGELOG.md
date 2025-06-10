@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.0] - 2025-06-10
+
+### ✨ Added
+-   **Configurable `BIGINT` Transformation**: Introduced `bigintTransform` option in `SupaLitePG` constructor to allow users to specify how `BIGINT` database types are transformed (to `'bigint'`, `'string'`, or `'number'`). Default is `'bigint'`. This provides flexibility and helps mitigate `JSON.stringify` errors with native `BigInt` objects. (See [docs/changelog/2025-06-10-bigint-handling-enhancement.md](docs/changelog/2025-06-10-bigint-handling-enhancement.md) for details)
+
+### 🛠 Changed
+-   The internal `Json` type in `src/types.ts` now explicitly includes `bigint`, with documentation clarifying user responsibility for `JSON.stringify` handling.
+-   Improved client initialization logging for `bigintTransform` mode when `verbose` is enabled.
+
 ## [0.1.8] - 2025-03-04
 
 ### Fixed

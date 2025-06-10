@@ -44,8 +44,10 @@ export type UpdateRow<T extends DatabaseSchema, S extends SchemaName<T>, K exten
     updated_at?: string | null;
 } : never;
 export type EnumType<T extends DatabaseSchema, S extends SchemaName<T>, E extends keyof NonNullable<T[S]['Enums']>> = NonNullable<T[S]['Enums']>[E];
+export type BigintTransformType = 'bigint' | 'string' | 'number';
 export interface SupaliteConfig {
     connectionString?: string;
+    bigintTransform?: BigintTransformType;
     user?: string;
     host?: string;
     database?: string;

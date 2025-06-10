@@ -28,6 +28,7 @@ export declare class SupaLitePG<T extends {
     private schema;
     private schemaCache;
     verbose: boolean;
+    private bigintTransform;
     constructor(config?: SupaliteConfig);
     begin(): Promise<void>;
     commit(): Promise<void>;
