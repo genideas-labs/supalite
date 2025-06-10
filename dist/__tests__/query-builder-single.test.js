@@ -55,6 +55,14 @@ describe('QueryBuilder single() and maybeSingle() methods', () => {
         value VARCHAR(100)
       );
     `);
+        await pool.query(`DROP TABLE IF EXISTS jsonb_test_table;`);
+        await pool.query(`
+      CREATE TABLE jsonb_test_table (
+        id SERIAL PRIMARY KEY,
+        jsonb_data JSONB,
+        another_json_field JSONB
+      );
+    `);
     });
     beforeEach(async () => {
         client = new postgres_client_1.SupaLitePG({ connectionString });
@@ -67,6 +75,7 @@ describe('QueryBuilder single() and maybeSingle() methods', () => {
             await pool.query('DELETE FROM profiles;'); // Assuming 'profiles' table references 'users'
             await pool.query('DELETE FROM users;');
             await pool.query('DELETE FROM test_table_for_multi_row;');
+            await pool.query('DELETE FROM jsonb_test_table;');
             await pool.query(`
         INSERT INTO users (id, name, email, status) VALUES
         (1, 'User One', 'user1@example.com', 'active'),
@@ -89,6 +98,13 @@ describe('QueryBuilder single() and maybeSingle() methods', () => {
         group_key = EXCLUDED.group_key, value = EXCLUDED.value;
       `);
             // await pool.query(`SELECT setval(pg_get_serial_sequence('test_table_for_multi_row', 'id'), (SELECT MAX(id) FROM test_table_for_multi_row), true);`);
+            await pool.query(`
+        INSERT INTO jsonb_test_table (id, jsonb_data, another_json_field) VALUES
+        (1, '[]', null) -- Insert an empty array and null for another_json_field
+        ON CONFLICT (id) DO UPDATE SET 
+          jsonb_data = EXCLUDED.jsonb_data, 
+          another_json_field = EXCLUDED.another_json_field;
+      `);
         }
         catch (err) {
             console.error('Error during beforeEach data setup:', err);
@@ -185,6 +201,44 @@ describe('QueryBuilder single() and maybeSingle() methods', () => {
             expect(error?.message).toContain('Multiple rows returned');
             expect(status).toBe(406);
             expect(statusText).toContain('Not Acceptable');
+        });
+    });
+    // Tests for JSONB field operations
+    describe('JSONB field operations', () => {
+        test('should insert and select an array in a JSONB field', async () => {
+            const testArray = ['string_value', 123, { nested_key: 'nested_value' }, null];
+            // Insert data
+            const { error: insertError } = await client
+                .from('jsonb_test_table')
+                .insert({ jsonb_data: testArray, id: 2 }); // Use a new ID. No stringify needed.
+            expect(insertError).toBeNull();
+            // Select the inserted data
+            const { data, error: selectError, status } = await client
+                .from('jsonb_test_table')
+                .select('jsonb_data')
+                .eq('id', 2)
+                .single();
+            console.log('Selected JSONB data:', data);
+            expect(selectError).toBeNull();
+            expect(status).toBe(200);
+            expect(data).not.toBeNull();
+            expect(data?.jsonb_data).toEqual(testArray);
+        });
+        test('should insert and select an object in another JSONB field', async () => {
+            const testObject = { key1: "value1", count: 100, active: true, nested: { id: "n1" } };
+            const { error: insertError } = await client
+                .from('jsonb_test_table')
+                .insert({ id: 3, another_json_field: testObject });
+            expect(insertError).toBeNull();
+            const { data, error: selectError } = await client
+                .from('jsonb_test_table')
+                .select('another_json_field')
+                .eq('id', 3)
+                .single();
+            console.log('Selected another_json_field data:', data);
+            expect(selectError).toBeNull();
+            expect(data).not.toBeNull();
+            expect(data?.another_json_field).toEqual(testObject);
         });
     });
 });

@@ -27,7 +27,15 @@ class QueryBuilder {
         return this.execute().finally(onfinally);
     }
     select(columns = '*', options) {
-        this.selectColumns = columns;
+        if (columns && columns !== '*') {
+            this.selectColumns = columns.split(',')
+                .map(col => col.trim())
+                .map(col => col.startsWith('"') && col.endsWith('"') ? col : `"${col}"`)
+                .join(', ');
+        }
+        else {
+            this.selectColumns = columns;
+        }
         this.countOption = options?.count;
         this.headOption = options?.head;
         return this;
@@ -215,19 +223,35 @@ class QueryBuilder {
                     if (rows.length === 0)
                         throw new Error('Empty array provided for insert');
                     insertColumns = Object.keys(rows[0]);
-                    values = rows.map(row => Object.values(row)).flat();
+                    // Process each row for potential JSON stringification
+                    const processedRowsValues = rows.map(row => Object.values(row).map(val => {
+                        if (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date))) {
+                            return JSON.stringify(val);
+                        }
+                        return val;
+                    }));
+                    values = processedRowsValues.flat();
                     const placeholders = rows.map((_, i) => `(${insertColumns.map((_, j) => `$${i * insertColumns.length + j + 1}`).join(',')})`).join(',');
                     query = `INSERT INTO ${schemaTable} ("${insertColumns.join('","')}") VALUES ${placeholders}`;
                 }
                 else {
                     const insertData = this.insertData;
                     insertColumns = Object.keys(insertData);
-                    values = Object.values(insertData);
+                    values = Object.values(insertData).map(val => {
+                        if (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date))) {
+                            return JSON.stringify(val);
+                        }
+                        return val;
+                    });
                     const insertPlaceholders = values.map((_, i) => `$${i + 1}`).join(',');
                     query = `INSERT INTO ${schemaTable} ("${insertColumns.join('","')}") VALUES (${insertPlaceholders})`;
                 }
                 if (this.queryType === 'UPSERT' && this.conflictTarget) {
-                    query += ` ON CONFLICT (${this.conflictTarget}) DO UPDATE SET `;
+                    // Quote conflict target if it's a simple column name and not already quoted
+                    const conflictTargetSQL = (this.conflictTarget.includes('"') || this.conflictTarget.includes('(') || this.conflictTarget.includes(','))
+                        ? this.conflictTarget
+                        : `"${this.conflictTarget}"`;
+                    query += ` ON CONFLICT (${conflictTargetSQL}) DO UPDATE SET `;
                     query += insertColumns
                         .map((col) => `"${col}" = EXCLUDED."${col}"`)
                         .join(', ');
@@ -246,11 +270,16 @@ class QueryBuilder {
                 if ('updated_at' in updateData && !updateData.updated_at) {
                     updateData.updated_at = now;
                 }
-                const updateValues = Object.values(updateData);
+                const processedUpdateValues = Object.values(updateData).map(val => {
+                    if (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date))) {
+                        return JSON.stringify(val);
+                    }
+                    return val;
+                });
                 const setColumns = Object.keys(updateData).map((key, index) => `"${String(key)}" = $${index + 1}`);
                 query = `UPDATE ${schemaTable} SET ${setColumns.join(', ')}`;
-                values = [...updateValues, ...this.whereValues];
-                query += this.buildWhereClause(updateValues);
+                values = [...processedUpdateValues, ...this.whereValues];
+                query += this.buildWhereClause(processedUpdateValues);
                 query += returning;
                 break;
             }
