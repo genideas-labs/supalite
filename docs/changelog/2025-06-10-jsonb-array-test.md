@@ -4,9 +4,22 @@
     - Updated `JsonbTestTable` related types to use the global `Json` type.
     - Added `another_json_field` (JSONB) to `jsonb_test_table` schema and tests.
     - Modified `beforeAll` to `DROP TABLE IF EXISTS jsonb_test_table` before `CREATE TABLE` to ensure schema updates are applied, fixing a "column does not exist" error during tests.
-    - Removed explicit `JSON.stringify()` from test cases, relying on internal handling.
+    - Removed explicit `JSON.stringify()` from test cases, as this is now handled automatically by `QueryBuilder` based on schema information.
     - Added a new test case for inserting/selecting an object into `another_json_field`.
-- Modified `src/query-builder.ts` (`buildQuery` method):
-    - Implemented automatic `JSON.stringify()` for array or object values (excluding `Date` instances) when preparing data for `INSERT`, `UPSERT`, and `UPDATE` operations. This allows users to pass JavaScript objects/arrays directly for `json`/`jsonb` columns.
-    - Corrected a TypeScript error (`Cannot find name 'updateValues'`) in the `UPDATE` case of `buildQuery`.
-- Ensured `src/types.ts` contains the `Json` type definition.
+    - Added a test case for inserting an empty JavaScript array `[]` into a `jsonb` field, now handled automatically.
+- Modified `src/postgres-client.ts`:
+    - Added `schemaCache` to store column type information fetched from `information_schema.columns`.
+    - Implemented `getColumnPgType(schema, table, column)` method to retrieve (and cache) PostgreSQL data types for columns.
+    - Added `verbose` option to `SupaliteConfig` and `SupaLitePG` for logging.
+    - Modified `from()` method to pass `SupaLitePG` instance and `verbose` setting to `QueryBuilder`.
+- Modified `src/query-builder.ts`:
+    - Updated constructor to accept `SupaLitePG` client instance and `verbose` setting.
+    - Made `buildQuery()` method `async`.
+    - Implemented schema-aware value processing in `buildQuery()` for `INSERT`, `UPSERT`, and `UPDATE`:
+        - Uses `client.getColumnPgType()` to get the PostgreSQL type of each column.
+        - If `pgType` is 'json' or 'jsonb', JavaScript objects and arrays are `JSON.stringify()`'d.
+        - If `pgType` is 'bigint', JavaScript `BigInt`s are `toString()`'d.
+        - Otherwise (e.g., for `text[]`, `integer[]`), values (including JavaScript arrays) are passed as-is to the `pg` driver.
+    - Updated `execute()` method to `await buildQuery()` and include verbose logging for SQL and values if enabled.
+- Ensured `src/types.ts` contains the `Json` type and `verbose` option in `SupaliteConfig`.
+- **Outcome**: `QueryBuilder` now intelligently handles serialization for `json`/`jsonb`, `bigint`, and native array types based on runtime schema information, providing a more seamless experience similar to `supabase-js`. All related tests pass.

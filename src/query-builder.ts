@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { PostgresError } from './errors';
+import type { SupaLitePG } from './postgres-client'; // Import SupaLitePG type
 import {
   TableName,
   TableOrViewName,
@@ -35,10 +36,20 @@ export class QueryBuilder<
   private insertData?: InsertRow<T, S, K> | InsertRow<T, S, K>[];
   private updateData?: UpdateRow<T, S, K>;
   private conflictTarget?: string;
+  private client: SupaLitePG<T>; // Store the SupaLitePG client instance
+  private verbose: boolean = false;
 
-  constructor(private pool: Pool, table: K, schema: S = 'public' as S) {
+  constructor(
+    private pool: Pool,
+    client: SupaLitePG<T>, // Accept SupaLitePG instance
+    table: K,
+    schema: S = 'public' as S,
+    verbose: boolean = false // Accept verbose setting
+  ) {
+    this.client = client;
     this.table = table;
     this.schema = schema;
+    this.verbose = verbose;
   }
 
   then<TResult1 = QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>>, TResult2 = never>(
@@ -264,7 +275,7 @@ export class QueryBuilder<
     return ' WHERE ' + conditions.join(' AND ');
   }
 
-  private buildQuery(): { query: string; values: any[] } {
+  private async buildQuery(): Promise<{ query: string; values: any[] }> { // Made async
     let query = '';
     let values: any[] = [];
     let insertColumns: string[] = [];
@@ -293,19 +304,24 @@ export class QueryBuilder<
           if (rows.length === 0) throw new Error('Empty array provided for insert');
           
           insertColumns = Object.keys(rows[0]);
-          // Process each row for potential JSON stringification
-          const processedRowsValues = rows.map(row => 
-            Object.values(row).map(val => {
+          const processedRowsValuesPromises = rows.map(async (row) => {
+            const rowValues = [];
+            for (const colName of insertColumns) { // Ensure order of values matches order of columns
+              const val = (row as Record<string, any>)[colName];
+              const pgType = await this.client.getColumnPgType(String(this.schema), String(this.table), colName);
               if (typeof val === 'bigint') {
-                return val.toString();
+                rowValues.push(val.toString());
+              } else if ((pgType === 'json' || pgType === 'jsonb') && 
+                         (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date)))) {
+                rowValues.push(JSON.stringify(val));
+              } else {
+                rowValues.push(val);
               }
-              if (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date))) {
-                return JSON.stringify(val);
-              }
-              return val;
-            })
-          );
-          values = processedRowsValues.flat();
+            }
+            return rowValues;
+          });
+          const processedRowsValuesArrays = await Promise.all(processedRowsValuesPromises);
+          values = processedRowsValuesArrays.flat();
           const placeholders = rows.map((_, i) => 
             `(${insertColumns.map((_, j) => `$${i * insertColumns.length + j + 1}`).join(',')})`
           ).join(',');
@@ -314,15 +330,19 @@ export class QueryBuilder<
         } else {
           const insertData = this.insertData as Record<string, any>;
           insertColumns = Object.keys(insertData);
-          values = Object.values(insertData).map(val => {
+          const valuePromises = insertColumns.map(async (colName) => { // Iterate by column name to get pgType
+            const val = insertData[colName];
+            const pgType = await this.client.getColumnPgType(String(this.schema), String(this.table), colName);
             if (typeof val === 'bigint') {
               return val.toString();
             }
-            if (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date))) {
+            if ((pgType === 'json' || pgType === 'jsonb') && 
+                (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date)))) {
               return JSON.stringify(val);
             }
             return val;
           });
+          values = await Promise.all(valuePromises);
           const insertPlaceholders = values.map((_, i) => `$${i + 1}`).join(',');
           query = `INSERT INTO ${schemaTable} ("${insertColumns.join('","')}") VALUES (${insertPlaceholders})`;
         }
@@ -352,17 +372,23 @@ export class QueryBuilder<
         if ('updated_at' in updateData && !updateData.updated_at) {
           updateData.updated_at = now;
         }
-
-        const processedUpdateValues = Object.values(updateData).map(val => {
+        
+        const updateColumns = Object.keys(updateData);
+        const processedUpdateValuesPromises = updateColumns.map(async (colName) => {
+          const val = (updateData as Record<string, any>)[colName];
+          const pgType = await this.client.getColumnPgType(String(this.schema), String(this.table), colName);
           if (typeof val === 'bigint') {
             return val.toString();
           }
-          if (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date))) {
+          if ((pgType === 'json' || pgType === 'jsonb') && 
+              (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date)))) {
             return JSON.stringify(val);
           }
           return val;
         });
-        const setColumns = Object.keys(updateData).map(
+        const processedUpdateValues = await Promise.all(processedUpdateValuesPromises);
+        
+        const setColumns = updateColumns.map(
           (key, index) => `"${String(key)}" = $${index + 1}`
         );
         query = `UPDATE ${schemaTable} SET ${setColumns.join(', ')}`;
@@ -401,7 +427,13 @@ export class QueryBuilder<
 
   async execute(): Promise<QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>>> {
     try {
-      const { query, values } = this.buildQuery();
+      const { query, values } = await this.buildQuery(); // await buildQuery
+      
+      if (this.verbose) {
+        console.log('[SupaLite VERBOSE] SQL:', query);
+        console.log('[SupaLite VERBOSE] Values:', values);
+      }
+      
       const result = await this.pool.query(query, values);
 
       if (this.queryType === 'DELETE' && !this.shouldReturnData()) {
@@ -482,6 +514,9 @@ export class QueryBuilder<
         statusText: 'OK',
       } as QueryResult<Row<T, S, K>>;
     } catch (err: any) {
+      if (this.verbose) {
+        console.error('[SupaLite VERBOSE] Error:', err);
+      }
       return {
         data: [],
         error: new PostgresError(err.message),

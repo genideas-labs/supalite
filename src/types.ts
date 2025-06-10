@@ -95,6 +95,7 @@ export interface SupaliteConfig {
   port?: number;
   ssl?: boolean;
   schema?: string;
+  verbose?: boolean; // Added for verbose logging
 }
 
 export type QueryType = 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'UPSERT';

@@ -231,12 +231,26 @@ const { data, error } = await client
   ]);
 
 // JSONB 배열 데이터 처리
+// 중요: JSON/JSONB 컬럼에 배열을 삽입/업데이트할 경우, 사용자가 직접 JSON.stringify()를 사용해야 합니다.
+// SupaLite는 일반 객체에 대해서만 자동 stringify를 수행합니다.
+const myJsonArray = ['tag1', 2025, { active: true }];
 const { data: jsonData, error: jsonError } = await client
   .from('your_jsonb_table') // 'your_jsonb_table'을 실제 테이블명으로 변경
   .insert({ 
-    metadata_array: ['tag1', 2025, { active: true }] 
+    metadata_array: JSON.stringify(myJsonArray) // 배열은 직접 stringify
   })
   .select('metadata_array')
+  .single();
+
+// 네이티브 배열(TEXT[], INTEGER[] 등) 데이터 처리
+// 이 경우, JavaScript 배열을 직접 전달하면 pg 드라이버가 올바르게 처리합니다.
+const { data: nativeArrayData, error: nativeArrayError } = await client
+  .from('your_native_array_table') // 실제 테이블명으로 변경
+  .insert({
+    tags_column: ['tech', 'event'], // TEXT[] 컬럼 예시
+    scores_column: [100, 95, 88]    // INTEGER[] 컬럼 예시
+  })
+  .select('tags_column, scores_column')
   .single();
 
 // 다른 스키마 사용

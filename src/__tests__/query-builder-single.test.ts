@@ -265,7 +265,7 @@ describe('QueryBuilder single() and maybeSingle() methods', () => {
       // Insert data
       const { error: insertError } = await client
         .from('jsonb_test_table')
-        .insert({ jsonb_data: testArray, id: 2 }); // Use a new ID. No stringify needed.
+        .insert({ jsonb_data: testArray, id: 2 }); // No explicit stringify needed
 
       expect(insertError).toBeNull();
 
@@ -302,6 +302,40 @@ describe('QueryBuilder single() and maybeSingle() methods', () => {
       expect(selectError).toBeNull();
       expect(data).not.toBeNull();
       expect(data?.another_json_field).toEqual(testObject);
+    });
+
+    test('should insert an empty array [] into a JSONB field correctly', async () => {
+      const emptyArray: Json = [];
+      const newId = 4; // Ensure this ID doesn't conflict with other tests or beforeEach setup
+
+      // 1. 빈 배열 삽입
+      const { error: insertError } = await client
+        .from('jsonb_test_table')
+        .insert({ id: newId, jsonb_data: emptyArray }); // No explicit stringify needed
+
+      expect(insertError).toBeNull();
+
+      // 2. 삽입된 데이터 조회 (SupaLite 클라이언트 사용)
+      const { data, error: selectError } = await client
+        .from('jsonb_test_table')
+        .select('jsonb_data')
+        .eq('id', newId)
+        .single();
+
+      expect(selectError).toBeNull();
+      expect(data).not.toBeNull();
+      // 3. JavaScript 배열과 동일한지 확인
+      expect(data?.jsonb_data).toEqual(emptyArray); 
+      expect(Array.isArray(data?.jsonb_data)).toBe(true);
+      expect(data?.jsonb_data?.length).toBe(0);
+
+      // 4. (선택 사항) 실제 DB 값 확인
+      const directDbResult = await pool.query(
+        'SELECT jsonb_data FROM jsonb_test_table WHERE id = $1',
+        [newId]
+      );
+      expect(directDbResult.rows.length).toBe(1);
+      expect(directDbResult.rows[0].jsonb_data).toEqual(emptyArray); 
     });
   });
 });

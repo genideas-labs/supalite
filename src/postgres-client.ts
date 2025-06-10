@@ -36,8 +36,11 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
   private client: any | null = null;
   private isTransaction: boolean = false;
   private schema: string;
+  private schemaCache: Map<string, Map<string, string>> = new Map(); // schemaName.tableName -> Map<columnName, pgDataType>
+  public verbose: boolean = false;
 
   constructor(config?: SupaliteConfig) {
+    this.verbose = config?.verbose || process.env.SUPALITE_VERBOSE === 'true' || false;
     // connectionString이 제공되면 이를 우선 사용
     if (config?.connectionString || process.env.DB_CONNECTION) {
       try {
@@ -154,11 +157,57 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
     table: K,
     schema?: S
   ): QueryBuilder<T, S, K> & Promise<QueryResult<Row<T, S, K>>> & { single(): Promise<SingleQueryResult<Row<T, S, K>>> } {
-    return new QueryBuilder<T, S, K>(
+    // QueryBuilder constructor will be updated to accept these arguments
+    return new (QueryBuilder as any)( // Use 'as any' temporarily if QueryBuilder constructor not yet updated
       this.pool,
+      this, // Pass the SupaLitePG instance itself
       table,
-      schema || 'public' as S
+      schema || ('public' as S),
+      this.verbose // Pass verbose setting
     ) as QueryBuilder<T, S, K> & Promise<QueryResult<Row<T, S, K>>> & { single(): Promise<SingleQueryResult<Row<T, S, K>>> };
+  }
+
+  public async getColumnPgType(dbSchema: string, tableName: string, columnName: string): Promise<string | undefined> {
+    const tableKey = `${dbSchema}.${tableName}`;
+    if (this.verbose) console.log(`[SupaLite VERBOSE] getColumnPgType called for ${tableKey}.${columnName}`);
+
+    let tableInfo = this.schemaCache.get(tableKey);
+
+    if (!tableInfo) {
+      if (this.verbose) console.log(`[SupaLite VERBOSE] Cache miss for table ${tableKey}. Querying information_schema.`);
+      try {
+        const query = `
+          SELECT column_name, data_type 
+          FROM information_schema.columns 
+          WHERE table_schema = $1 AND table_name = $2;
+        `;
+        // Use a temporary client from the pool for this schema query
+        // if not in a transaction, or use the transaction client if in one.
+        const activeClient = this.isTransaction && this.client ? this.client : await this.pool.connect();
+        try {
+          const result = await activeClient.query(query, [dbSchema, tableName]);
+          tableInfo = new Map<string, string>();
+          result.rows.forEach((row: { column_name: string; data_type: string }) => { // Add type for row
+            tableInfo!.set(row.column_name, row.data_type.toLowerCase());
+          });
+          this.schemaCache.set(tableKey, tableInfo);
+          if (this.verbose) console.log(`[SupaLite VERBOSE] Cached schema for ${tableKey}:`, tableInfo);
+        } finally {
+          if (!(this.isTransaction && this.client)) { // Only release if it's a temp client not managed by transaction
+            (activeClient as any).release(); // Cast to any if 'release' is not on type PoolClient from transaction
+          }
+        }
+      } catch (err: any) {
+        console.error(`[SupaLite ERROR] Failed to query information_schema for ${tableKey}:`, err.message);
+        return undefined; 
+      }
+    } else {
+      if (this.verbose) console.log(`[SupaLite VERBOSE] Cache hit for table ${tableKey}.`);
+    }
+    
+    const pgType = tableInfo?.get(columnName);
+    if (this.verbose) console.log(`[SupaLite VERBOSE] pgType for ${tableKey}.${columnName}: ${pgType}`);
+    return pgType;
   }
 
   async rpc(
