@@ -5,7 +5,7 @@ import { config } from 'dotenv';
 
 config(); // Load .env variables
 
-import { DatabaseSchema, TableBase } from '../types'; // Import necessary types
+import { DatabaseSchema, TableBase, Json } from '../types'; // Import Json type
 
 // Define specific Row/Insert/Update types for tables used in tests
 type UsersTableRow = { id: number; name: string; email: string; status: string | null; created_at: string; };
@@ -17,9 +17,9 @@ type MultiRowTableInsert = { id?: number; group_key: string; value: string };
 type MultiRowTableUpdate = { id?: number; group_key?: string; value?: string };
 
 // Define Row/Insert/Update types for the new jsonb_test_table
-type JsonbTestTableRow = { id: number; jsonb_data: any[] | Record<string, any> | null };
-type JsonbTestTableInsert = { id?: number; jsonb_data?: any[] | Record<string, any> | null };
-type JsonbTestTableUpdate = { id?: number; jsonb_data?: any[] | Record<string, any> | null };
+type JsonbTestTableRow = { id: number; jsonb_data: Json | null; another_json_field?: Json | null };
+type JsonbTestTableInsert = { id?: number; jsonb_data?: Json | null; another_json_field?: Json | null };
+type JsonbTestTableUpdate = { id?: number; jsonb_data?: Json | null; another_json_field?: Json | null };
 
 // Define our test-specific database schema
 interface TestDatabase extends DatabaseSchema { // Ensures [schema: string]: SchemaDefinition
@@ -89,10 +89,12 @@ describe('QueryBuilder single() and maybeSingle() methods', () => {
         value VARCHAR(100)
       );
     `);
+    await pool.query(`DROP TABLE IF EXISTS jsonb_test_table;`);
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS jsonb_test_table (
+      CREATE TABLE jsonb_test_table (
         id SERIAL PRIMARY KEY,
-        jsonb_data JSONB
+        jsonb_data JSONB,
+        another_json_field JSONB
       );
     `);
   });
@@ -136,9 +138,11 @@ describe('QueryBuilder single() and maybeSingle() methods', () => {
       // await pool.query(`SELECT setval(pg_get_serial_sequence('test_table_for_multi_row', 'id'), (SELECT MAX(id) FROM test_table_for_multi_row), true);`);
 
       await pool.query(`
-        INSERT INTO jsonb_test_table (id, jsonb_data) VALUES
-        (1, '[]') -- Insert an empty array as JSONB
-        ON CONFLICT (id) DO UPDATE SET jsonb_data = EXCLUDED.jsonb_data;
+        INSERT INTO jsonb_test_table (id, jsonb_data, another_json_field) VALUES
+        (1, '[]', null) -- Insert an empty array and null for another_json_field
+        ON CONFLICT (id) DO UPDATE SET 
+          jsonb_data = EXCLUDED.jsonb_data, 
+          another_json_field = EXCLUDED.another_json_field;
       `);
 
     } catch (err) {
@@ -261,7 +265,7 @@ describe('QueryBuilder single() and maybeSingle() methods', () => {
       // Insert data
       const { error: insertError } = await client
         .from('jsonb_test_table')
-        .insert({ jsonb_data: JSON.stringify(testArray) as any, id: 2 }); // Use a new ID. Cast to any to satisfy type if needed.
+        .insert({ jsonb_data: testArray, id: 2 }); // Use a new ID. No stringify needed.
 
       expect(insertError).toBeNull();
 
@@ -277,6 +281,27 @@ describe('QueryBuilder single() and maybeSingle() methods', () => {
       expect(status).toBe(200);
       expect(data).not.toBeNull();
       expect(data?.jsonb_data).toEqual(testArray);
+    });
+
+    test('should insert and select an object in another JSONB field', async () => {
+      const testObject: Json = { key1: "value1", count: 100, active: true, nested: { id: "n1" } };
+      const { error: insertError } = await client
+        .from('jsonb_test_table')
+        .insert({ id: 3, another_json_field: testObject });
+
+      expect(insertError).toBeNull();
+
+      const { data, error: selectError } = await client
+        .from('jsonb_test_table')
+        .select('another_json_field')
+        .eq('id', 3)
+        .single();
+      
+      console.log('Selected another_json_field data:', data);
+
+      expect(selectError).toBeNull();
+      expect(data).not.toBeNull();
+      expect(data?.another_json_field).toEqual(testObject);
     });
   });
 });
