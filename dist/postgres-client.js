@@ -12,6 +12,7 @@ class SupaLitePG {
         this.client = null;
         this.isTransaction = false;
         this.schemaCache = new Map(); // schemaName.tableName -> Map<columnName, pgDataType>
+        this.foreignKeyCache = new Map();
         this.verbose = false;
         this.verbose = config?.verbose || process.env.SUPALITE_VERBOSE === 'true' || false;
         this.bigintTransform = config?.bigintTransform || 'bigint'; // 기본값 'bigint'
@@ -177,6 +178,47 @@ class SupaLitePG {
         if (this.verbose)
             console.log(`[SupaLite VERBOSE] pgType for ${tableKey}.${columnName}: ${pgType}`);
         return pgType;
+    }
+    async getForeignKey(schema, table, foreignTable) {
+        const cacheKey = `${schema}.${table}.${foreignTable}`;
+        if (this.foreignKeyCache.has(cacheKey)) {
+            return this.foreignKeyCache.get(cacheKey);
+        }
+        const query = `
+      SELECT
+        kcu.column_name,
+        ccu.column_name AS foreign_column_name
+      FROM
+        information_schema.table_constraints AS tc
+        JOIN information_schema.key_column_usage AS kcu
+          ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+        JOIN information_schema.constraint_column_usage AS ccu
+          ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+      WHERE
+        tc.constraint_type = 'FOREIGN KEY'
+        AND tc.table_schema = $1
+        AND tc.table_name = $2
+        AND ccu.table_name = $3;
+    `;
+        const activeClient = this.isTransaction && this.client ? this.client : await this.pool.connect();
+        try {
+            const result = await activeClient.query(query, [schema, foreignTable, table]);
+            if (result.rows.length > 0) {
+                const relationship = {
+                    column: result.rows[0].foreign_column_name,
+                    foreignColumn: result.rows[0].column_name,
+                };
+                this.foreignKeyCache.set(cacheKey, relationship);
+                return relationship;
+            }
+        }
+        finally {
+            if (!(this.isTransaction && this.client)) {
+                activeClient.release();
+            }
+        }
+        this.foreignKeyCache.set(cacheKey, null);
+        return null;
     }
     async rpc(procedureName, params = {}) {
         try {

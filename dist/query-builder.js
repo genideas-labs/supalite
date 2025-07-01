@@ -10,6 +10,7 @@ class QueryBuilder {
         this.pool = pool;
         this[_a] = 'QueryBuilder';
         this.selectColumns = null;
+        this.joinClauses = [];
         this.whereConditions = [];
         this.orConditions = [];
         this.orderByColumns = [];
@@ -32,17 +33,41 @@ class QueryBuilder {
         return this.execute().finally(onfinally);
     }
     select(columns = '*', options) {
-        if (columns && columns !== '*') {
-            this.selectColumns = columns.split(',')
-                .map(col => col.trim())
-                .map(col => col.startsWith('"') && col.endsWith('"') ? col : `"${col}"`)
-                .join(', ');
-        }
-        else {
-            this.selectColumns = columns;
-        }
         this.countOption = options?.count;
         this.headOption = options?.head;
+        if (!columns || columns === '*') {
+            this.selectColumns = '*';
+            return this;
+        }
+        const joinRegex = /(\w+)\(([^)]+)\)/g;
+        let match;
+        const regularColumns = [];
+        let lastIndex = 0;
+        while ((match = joinRegex.exec(columns)) !== null) {
+            const foreignTable = match[1];
+            const innerColumns = match[2];
+            this.joinClauses.push({ foreignTable, columns: innerColumns });
+            // Add the part of the string before this match to regular columns, if any
+            const preceding = columns.substring(lastIndex, match.index).trim();
+            if (preceding) {
+                regularColumns.push(...preceding.split(',').filter(c => c.trim()));
+            }
+            lastIndex = joinRegex.lastIndex;
+        }
+        // Add the rest of the string after the last match
+        const remaining = columns.substring(lastIndex).trim();
+        if (remaining) {
+            regularColumns.push(...remaining.split(',').filter(c => c.trim()));
+        }
+        const processedColumns = regularColumns
+            .map(col => col.trim())
+            .filter(col => col)
+            .map(col => {
+            if (col === '*')
+                return '*';
+            return col.startsWith('"') && col.endsWith('"') ? col : `"${col}"`;
+        });
+        this.selectColumns = processedColumns.length > 0 ? processedColumns.join(', ') : null;
         return this;
     }
     match(conditions) {
@@ -207,18 +232,48 @@ class QueryBuilder {
         const returning = this.shouldReturnData() ? ` RETURNING ${this.selectColumns || '*'}` : '';
         const schemaTable = `"${String(this.schema)}"."${String(this.table)}"`;
         switch (this.queryType) {
-            case 'SELECT':
+            case 'SELECT': {
                 if (this.headOption) {
                     query = `SELECT COUNT(*) FROM ${schemaTable}`;
+                    values = [...this.whereValues];
+                    break;
                 }
-                else {
-                    query = `SELECT ${this.selectColumns || '*'} FROM ${schemaTable}`;
-                    if (this.countOption === 'exact') {
-                        query = `SELECT *, COUNT(*) OVER() as exact_count FROM (${query}) subquery`;
+                let selectClause = this.selectColumns;
+                if (!selectClause) {
+                    selectClause = this.joinClauses.length > 0 ? `${schemaTable}.*` : '*';
+                }
+                else if (selectClause.includes('*') && this.joinClauses.length > 0) {
+                    selectClause = selectClause.replace('*', `${schemaTable}.*`);
+                }
+                const joinSubqueries = await Promise.all(this.joinClauses.map(async (join) => {
+                    const fk = await this.client.getForeignKey(String(this.schema), String(this.table), join.foreignTable);
+                    if (!fk) {
+                        // In a real scenario, you might want to throw an error or handle this case
+                        console.warn(`[SupaLite WARNING] No foreign key found from ${join.foreignTable} to ${String(this.table)}`);
+                        return null;
                     }
+                    const foreignSchemaTable = `"${String(this.schema)}"."${join.foreignTable}"`;
+                    return `(
+              SELECT json_agg(j)
+              FROM (
+                SELECT ${join.columns}
+                FROM ${foreignSchemaTable}
+                WHERE "${fk.foreignColumn}" = ${schemaTable}."${fk.column}"
+              ) as j
+            ) as "${join.foreignTable}"`;
+                }));
+                const validSubqueries = joinSubqueries.filter(Boolean).join(', ');
+                if (validSubqueries) {
+                    selectClause += `, ${validSubqueries}`;
+                }
+                query = `SELECT ${selectClause} FROM ${schemaTable}`;
+                if (this.countOption === 'exact') {
+                    // This part might need adjustment if subqueries are complex
+                    query = `SELECT *, COUNT(*) OVER() as exact_count FROM (${query}) subquery`;
                 }
                 values = [...this.whereValues];
                 break;
+            }
             case 'INSERT':
             case 'UPSERT': {
                 if (!this.insertData)

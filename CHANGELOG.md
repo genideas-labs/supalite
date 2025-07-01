@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.0] - 2025-07-01
+
+### ✨ Added
+-   **Join Query Support**: Implemented support for PostgREST-style join queries in the `.select()` method. You can now fetch related data from foreign tables using the syntax `related_table(*)` or `related_table(column1, column2)`. This is achieved by dynamically generating `json_agg` subqueries.
+
+### 🛠 Changed
+-   `SupaLitePG` client now includes a `getForeignKey` method to resolve foreign key relationships, with caching for better performance.
+-   `QueryBuilder`'s `select` and `buildQuery` methods were enhanced to parse the new syntax and construct the appropriate SQL queries.
+
 ## [0.4.0] - 2025-06-10
 
 ### ✨ Added

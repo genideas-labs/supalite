@@ -7,6 +7,7 @@ export declare class QueryBuilder<T extends DatabaseSchema, S extends SchemaName
     private table;
     private schema;
     private selectColumns;
+    private joinClauses;
     private whereConditions;
     private orConditions;
     private countOption?;
