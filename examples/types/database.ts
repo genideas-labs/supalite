@@ -126,6 +126,46 @@ export interface Database {
         };
         Relationships: [];
       };
+      authors: {
+        Row: {
+          id: number;
+          name: string;
+        };
+        Insert: {
+          id?: number;
+          name: string;
+        };
+        Update: {
+          id?: number;
+          name?: string;
+        };
+        Relationships: [];
+      };
+      books: {
+        Row: {
+          id: number;
+          title: string;
+          author_id: number;
+        };
+        Insert: {
+          id?: number;
+          title: string;
+          author_id: number;
+        };
+        Update: {
+          id?: number;
+          title?: string;
+          author_id?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "books_author_id_fkey";
+            columns: ["author_id"];
+            referencedRelation: "authors";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
     };
     Views: {
       user_posts_view: {
