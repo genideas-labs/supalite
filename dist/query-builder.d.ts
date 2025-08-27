@@ -38,6 +38,7 @@ export declare class QueryBuilder<T extends DatabaseSchema, S extends SchemaName
     eq(column: string, value: any): this;
     neq(column: string, value: any): this;
     is(column: string, value: any): this;
+    not(column: string, operator: string, value: any): this;
     contains(column: string, value: any): this;
     in(column: string, values: any[]): this;
     gte(column: string, value: any): this;

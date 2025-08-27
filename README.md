@@ -285,6 +285,7 @@ const { data, error } = await client
 - `ilike(column, pattern)`: 대소문자 구분 없는 LIKE
 - `in(column, values)`: IN 연산자
 - `is(column, value)`: IS 연산자
+- `not(column, operator, value)`: Negates an operator (e.g., `not('column', 'is', null)`).
 - `contains(column, value)`: 배열/JSON 포함 여부
 - `or(conditions)`: OR 조건 (예: 'status.eq.active,role.eq.admin')
 

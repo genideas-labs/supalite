@@ -152,6 +152,16 @@ export class QueryBuilder<
     return this;
   }
 
+  not(column: string, operator: string, value: any): this {
+    if (operator === 'is' && value === null) {
+      this.whereConditions.push(`"${column}" IS NOT NULL`);
+    } else {
+      // 추후 다른 not 연산자들을 위해 남겨둠
+      throw new Error(`Operator "${operator}" is not supported for "not" operation.`);
+    }
+    return this;
+  }
+
   contains(column: string, value: any): this {
     this.whereConditions.push(`"${column}" @> $${this.whereValues.length + 1}`);
     this.whereValues.push(value);
