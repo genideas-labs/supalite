@@ -241,6 +241,14 @@ describe('QueryBuilder single() and maybeSingle() methods', () => {
             expect(data?.another_json_field).toEqual(testObject);
         });
         test('should insert an empty array [] into a JSONB field correctly', async () => {
+            //const jsonObj = [ { test: 'test' } , { blabla : 1}];
+            const jsonObj = { test1: '123' };
+            const newId1 = 3; // Ensure this ID doesn't conflict with other tests or beforeEach setup
+            // 1. 빈 배열 삽입
+            const { error: insertError1 } = await client
+                .from('jsonb_test_table')
+                .insert({ id: newId1, jsonb_data: jsonObj }); // No explicit stringify needed
+            expect(insertError1).toBeNull();
             const emptyArray = [];
             const newId = 4; // Ensure this ID doesn't conflict with other tests or beforeEach setup
             // 1. 빈 배열 삽입
