@@ -268,6 +268,8 @@ const { data, error } = await client
 ### 쿼리 메소드
 
 - `select(columns?: string, options?: { count?: 'exact' | 'planned' | 'estimated', head?: boolean })`: 조회할 컬럼 지정
+  - `options.count`: `'exact'`로 설정하면 `limit`의 영향을 받지 않는 전체 결과의 개수를 `count` 속성으로 반환합니다.
+  - `options.head`: `true`로 설정하면 데이터 없이 `count`만 가져옵니다. `count` 옵션과 함께 사용하면 효율적으로 전체 개수만 조회할 수 있습니다.
 - `insert(data: T['Tables'][K]['Insert'] | T['Tables'][K]['Insert'][])`: 단일 또는 다중 레코드 삽입
 - `update(data: T['Tables'][K]['Update'])`: 레코드 업데이트
 - `delete()`: 레코드 삭제

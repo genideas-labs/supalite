@@ -329,6 +329,7 @@ export class QueryBuilder<
       case 'SELECT': {
         if (this.headOption) {
           query = `SELECT COUNT(*) FROM ${schemaTable}`;
+          query += this.buildWhereClause();
           values = [...this.whereValues];
           break;
         }
@@ -349,7 +350,6 @@ export class QueryBuilder<
             );
 
             if (!fk) {
-              // In a real scenario, you might want to throw an error or handle this case
               console.warn(`[SupaLite WARNING] No foreign key found from ${join.foreignTable} to ${String(this.table)}`);
               return null;
             }
@@ -371,14 +371,16 @@ export class QueryBuilder<
           selectClause += `, ${validSubqueries}`;
         }
 
-        query = `SELECT ${selectClause} FROM ${schemaTable}`;
-        
+        let baseQuery = `SELECT ${selectClause} FROM ${schemaTable}`;
+        baseQuery += this.buildWhereClause();
+        values = [...this.whereValues];
+
         if (this.countOption === 'exact') {
-          // This part might need adjustment if subqueries are complex
-          query = `SELECT *, COUNT(*) OVER() as exact_count FROM (${query}) subquery`;
+          query = `SELECT *, COUNT(*) OVER() as exact_count FROM (${baseQuery}) subquery`;
+        } else {
+          query = baseQuery;
         }
         
-        values = [...this.whereValues];
         break;
       }
 
@@ -493,20 +495,22 @@ export class QueryBuilder<
       }
     }
 
+    // Append clauses that apply to the outermost query
     if (this.queryType === 'SELECT') {
-      query += this.buildWhereClause();
-    }
+      // WHERE is already in the query or subquery
+      
+      // ORDER BY, LIMIT, and OFFSET always apply to the outer query
+      if (this.orderByColumns.length > 0) {
+        query += ` ORDER BY ${this.orderByColumns.join(', ')}`;
+      }
 
-    if (this.orderByColumns.length > 0 && this.queryType === 'SELECT') {
-      query += ` ORDER BY ${this.orderByColumns.join(', ')}`;
-    }
+      if (this.limitValue !== undefined) {
+        query += ` LIMIT ${this.limitValue}`;
+      }
 
-    if (this.limitValue !== undefined && this.queryType === 'SELECT') {
-      query += ` LIMIT ${this.limitValue}`;
-    }
-
-    if (this.offsetValue !== undefined && this.queryType === 'SELECT') {
-      query += ` OFFSET ${this.offsetValue}`;
+      if (this.offsetValue !== undefined) {
+        query += ` OFFSET ${this.offsetValue}`;
+      }
     }
 
     return { query, values };
@@ -553,28 +557,49 @@ export class QueryBuilder<
         } as QueryResult<Row<T, S, K>>;
       }
 
+      let countResult: number | null = null;
+      let dataResult = result.rows;
+
+      if (this.headOption) {
+        countResult = Number(result.rows[0].count);
+        dataResult = [];
+      } else if (this.countOption === 'exact') {
+        if (result.rows.length > 0) {
+          countResult = Number(result.rows[0].exact_count);
+          // exact_count 열을 모든 데이터 객체에서 제거
+          dataResult = result.rows.map(row => {
+            const newRow = { ...row };
+            delete (newRow as any).exact_count;
+            return newRow;
+          });
+        } else {
+          countResult = 0;
+        }
+      } else {
+        countResult = result.rowCount;
+      }
+
       if (this.singleMode) {
-        if (result.rows.length > 1) {
+        if (dataResult.length > 1) {
           return {
             data: null,
-            error: new PostgresError('PGRST114: Multiple rows returned'), // PGRST114: More than one row was returned
-            count: result.rowCount,
-            status: 406, // Not Acceptable
+            error: new PostgresError('PGRST114: Multiple rows returned'),
+            count: countResult,
+            status: 406,
             statusText: 'Not Acceptable. Expected a single row but found multiple.',
           };
         }
 
-        if (result.rows.length === 0) {
+        if (dataResult.length === 0) {
           if (this.singleMode === 'strict') {
             return {
               data: null,
-              error: new PostgresError('PGRST116: No rows found'), // PGRST116: Not found
+              error: new PostgresError('PGRST116: No rows found'),
               count: 0,
-              status: 404, // Not Found (more appropriate than 200 for strict single when not found)
+              status: 404,
               statusText: 'Not Found. Expected a single row but found no rows.',
             };
           }
-          // this.singleMode === 'maybe'
           return {
             data: null,
             error: null,
@@ -583,9 +608,8 @@ export class QueryBuilder<
             statusText: 'OK',
           };
         }
-        // result.rows.length === 1
         return {
-          data: result.rows[0],
+          data: dataResult[0],
           error: null,
           count: 1,
           status: 200,
@@ -594,9 +618,9 @@ export class QueryBuilder<
       }
 
       return {
-        data: result.rows.length > 0 ? result.rows : [],
+        data: dataResult,
         error: null,
-        count: result.rowCount,
+        count: countResult,
         status: 200,
         statusText: 'OK',
       } as QueryResult<Row<T, S, K>>;
