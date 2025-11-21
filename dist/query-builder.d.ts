@@ -41,7 +41,9 @@ export declare class QueryBuilder<T extends DatabaseSchema, S extends SchemaName
     not(column: string, operator: string, value: any): this;
     contains(column: string, value: any): this;
     in(column: string, values: any[]): this;
+    gt(column: string, value: any): this;
     gte(column: string, value: any): this;
+    lt(column: string, value: any): this;
     lte(column: string, value: any): this;
     order(column: string, options?: {
         ascending?: boolean;

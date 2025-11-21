@@ -122,8 +122,18 @@ class QueryBuilder {
         this.whereValues.push(...values);
         return this;
     }
+    gt(column, value) {
+        this.whereConditions.push(`"${column}" > $${this.whereValues.length + 1}`);
+        this.whereValues.push(value);
+        return this;
+    }
     gte(column, value) {
         this.whereConditions.push(`"${column}" >= $${this.whereValues.length + 1}`);
+        this.whereValues.push(value);
+        return this;
+    }
+    lt(column, value) {
+        this.whereConditions.push(`"${column}" < $${this.whereValues.length + 1}`);
         this.whereValues.push(value);
         return this;
     }

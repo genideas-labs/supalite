@@ -179,8 +179,20 @@ export class QueryBuilder<
     return this;
   }
 
+  gt(column: string, value: any): this {
+    this.whereConditions.push(`"${column}" > $${this.whereValues.length + 1}`);
+    this.whereValues.push(value);
+    return this;
+  }
+
   gte(column: string, value: any): this {
     this.whereConditions.push(`"${column}" >= $${this.whereValues.length + 1}`);
+    this.whereValues.push(value);
+    return this;
+  }
+
+  lt(column: string, value: any): this {
+    this.whereConditions.push(`"${column}" < $${this.whereValues.length + 1}`);
     this.whereValues.push(value);
     return this;
   }
