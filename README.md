@@ -289,7 +289,7 @@ const { data, error } = await client
 - `is(column, value)`: IS 연산자
 - `not(column, operator, value)`: Negates an operator (e.g., `not('column', 'is', null)`).
 - `contains(column, value)`: 배열/JSON 포함 여부
-- `or(conditions)`: OR 조건 (예: 'status.eq.active,role.eq.admin')
+- `or(conditions)`: OR 조건 (예: 'status.eq.active,role.eq.admin', 'valid_until.is.null')
 
 ### 기타 메소드
 
