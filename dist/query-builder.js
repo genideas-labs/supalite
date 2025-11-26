@@ -171,7 +171,7 @@ class QueryBuilder {
     or(conditions) {
         const orParts = conditions.split(',').map(condition => {
             const [field, op, value] = condition.split('.');
-            const validOperators = ['eq', 'neq', 'ilike', 'like', 'gt', 'gte', 'lt', 'lte'];
+            const validOperators = ['eq', 'neq', 'ilike', 'like', 'gt', 'gte', 'lt', 'lte', 'is'];
             if (!validOperators.includes(op)) {
                 throw new Error(`Invalid operator: ${op}`);
             }
@@ -204,6 +204,13 @@ class QueryBuilder {
                     return `"${field}" < $${paramIndex}`;
                 case 'lte':
                     return `"${field}" <= $${paramIndex}`;
+                case 'is':
+                    if (processedValue === null) {
+                        // Remove the null value from whereValues since we don't need a parameter for IS NULL
+                        this.whereValues.pop();
+                        return `"${field}" IS NULL`;
+                    }
+                    return `"${field}" IS $${paramIndex}`;
                 default:
                     return '';
             }

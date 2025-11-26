@@ -28,6 +28,161 @@ type SchemaWithTables = {
   CompositeTypes?: any;
 };
 
+export class RpcBuilder implements Promise<any> {
+  readonly [Symbol.toStringTag] = 'RpcBuilder';
+  private singleMode: 'strict' | 'maybe' | null = null;
+
+  constructor(
+    private pool: Pool,
+    private schema: string,
+    private procedureName: string,
+    private params: Record<string, any> = {}
+  ) {}
+
+  single() {
+    this.singleMode = 'strict';
+    return this;
+  }
+
+  maybeSingle() {
+    this.singleMode = 'maybe';
+    return this;
+  }
+
+  then<TResult1 = any, TResult2 = never>(
+    onfulfilled?: ((value: any) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
+  ): Promise<TResult1 | TResult2> {
+    return this.execute().then(onfulfilled, onrejected);
+  }
+
+  catch<TResult = never>(
+    onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null
+  ): Promise<any | TResult> {
+    return this.execute().catch(onrejected);
+  }
+
+  finally(onfinally?: (() => void) | null): Promise<any> {
+    return this.execute().finally(onfinally);
+  }
+
+  async execute(): Promise<{
+    data: any;
+    error: PostgresError | null;
+    count?: number | null;
+    status?: number;
+    statusText?: string;
+  }> {
+    try {
+      const paramNames = Object.keys(this.params);
+      const paramValues = Object.values(this.params);
+      const paramPlaceholders = paramNames.length > 0
+        ? paramNames.map((name, i) => `"${name}" := $${i + 1}`).join(', ')
+        : '';
+
+      const query = paramPlaceholders
+        ? `SELECT * FROM "${this.schema}"."${this.procedureName}"(${paramPlaceholders})`
+        : `SELECT * FROM "${this.schema}"."${this.procedureName}"()`;
+
+      const result = await this.pool.query(query, paramValues);
+
+      // Handle scalar return values (Supabase special handling)
+      // If result has 1 row and 1 column, and we are not in strict table mode (which rpc generally isn't),
+      // we check if it looks like a scalar return.
+      // However, if single() is called, we must respect row constraints.
+      
+      let data: any = result.rows;
+
+      // Unwrapping logic for scalar functions (legacy Supabase behavior emulation)
+      // If it returns a single row with a single column, treat as scalar IF not forcing array via logic.
+      // But here we'll stick to basic row handling first, then apply singleMode.
+      
+      // NOTE: Original logic had:
+      // if (result.rows.length === 1 && Object.keys(result.rows[0]).length === 1) { ... return single value ... }
+      // This implies unwrapping happens by default if it looks like a scalar.
+      
+      const isScalarCandidate = result.rows.length === 1 && Object.keys(result.rows[0]).length === 1;
+
+      if (this.singleMode) {
+        if (result.rows.length > 1) {
+          return {
+            data: null,
+            error: new PostgresError('PGRST114: Multiple rows returned'),
+            count: null,
+            status: 406,
+            statusText: 'Not Acceptable. Expected a single row but found multiple.'
+          };
+        }
+
+        if (result.rows.length === 0) {
+          if (this.singleMode === 'strict') {
+            return {
+              data: null,
+              error: new PostgresError('PGRST116: No rows found'),
+              count: null,
+              status: 404,
+              statusText: 'Not Found. Expected a single row but found no rows.'
+            };
+          }
+          // maybeSingle -> null data, no error
+          return {
+            data: null,
+            error: null,
+            count: 0,
+            status: 200,
+            statusText: 'OK'
+          };
+        }
+
+        // 1 row found
+        // Check for scalar unwrapping
+        if (Object.keys(result.rows[0]).length === 1) {
+           data = Object.values(result.rows[0])[0];
+        } else {
+           data = result.rows[0];
+        }
+        
+        return {
+          data,
+          error: null,
+          count: 1,
+          status: 200,
+          statusText: 'OK'
+        };
+      }
+
+      // Default behavior (no .single() called)
+      if (isScalarCandidate) {
+         data = Object.values(result.rows[0])[0];
+         return {
+          data,
+          error: null,
+          count: 1,
+          status: 200,
+          statusText: 'OK'
+         };
+      }
+
+      return {
+        data: result.rows.length > 0 ? result.rows : null,
+        error: null,
+        count: result.rowCount,
+        status: 200,
+        statusText: 'OK'
+      };
+
+    } catch (err: any) {
+      return {
+        data: null,
+        error: new PostgresError(err.message, err.code),
+        count: null,
+        status: 500,
+        statusText: 'Internal Server Error'
+      };
+    }
+  }
+}
+
 export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
   private pool: Pool;
   private client: any | null = null;
@@ -277,56 +432,11 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
     return null;
   }
 
-  async rpc(
+  rpc(
     procedureName: string,
     params: Record<string, any> = {}
-  ): Promise<{
-    data: any;
-    error: PostgresError | null;
-    count?: number | null;
-    status?: number;
-    statusText?: string;
-  }> {
-    try {
-      const paramNames = Object.keys(params);
-      const paramValues = Object.values(params);
-      const paramPlaceholders = paramNames.length > 0
-        ? paramNames.map((name, i) => `"${name}" := $${i + 1}`).join(', ')
-        : '';
-
-      const query = paramPlaceholders
-        ? `SELECT * FROM "${this.schema}"."${procedureName}"(${paramPlaceholders})`
-        : `SELECT * FROM "${this.schema}"."${procedureName}"()`;
-
-      const result = await this.pool.query(query, paramValues);
-
-      if (result.rows.length === 1 && Object.keys(result.rows[0]).length === 1) {
-        const singleValue = Object.values(result.rows[0])[0];
-        return {
-          data: singleValue,
-          error: null,
-          count: 1,
-          status: 200,
-          statusText: 'OK'
-        };
-      }
-
-      return {
-        data: result.rows.length > 0 ? result.rows : null,
-        error: null,
-        count: result.rowCount,
-        status: 200,
-        statusText: 'OK'
-      };
-    } catch (err: any) {
-      return {
-        data: null,
-        error: new PostgresError(err.message, err.code),
-        count: null,
-        status: 500,
-        statusText: 'Internal Server Error'
-      };
-    }
+  ): RpcBuilder {
+    return new RpcBuilder(this.pool, this.schema, procedureName, params);
   }
 
   // 연결 테스트 메서드

@@ -1,3 +1,4 @@
+import { Pool } from 'pg';
 import { QueryBuilder } from './query-builder';
 import { PostgresError } from './errors';
 import { TableOrViewName, SupaliteConfig, Row, QueryResult, SingleQueryResult } from './types';
@@ -19,6 +20,27 @@ type SchemaWithTables = {
     Enums?: any;
     CompositeTypes?: any;
 };
+export declare class RpcBuilder implements Promise<any> {
+    private pool;
+    private schema;
+    private procedureName;
+    private params;
+    readonly [Symbol.toStringTag] = "RpcBuilder";
+    private singleMode;
+    constructor(pool: Pool, schema: string, procedureName: string, params?: Record<string, any>);
+    single(): this;
+    maybeSingle(): this;
+    then<TResult1 = any, TResult2 = never>(onfulfilled?: ((value: any) => TResult1 | PromiseLike<TResult1>) | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null): Promise<TResult1 | TResult2>;
+    catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null): Promise<any | TResult>;
+    finally(onfinally?: (() => void) | null): Promise<any>;
+    execute(): Promise<{
+        data: any;
+        error: PostgresError | null;
+        count?: number | null;
+        status?: number;
+        statusText?: string;
+    }>;
+}
 export declare class SupaLitePG<T extends {
     [K: string]: SchemaWithTables;
 }> {
@@ -46,13 +68,7 @@ export declare class SupaLitePG<T extends {
         column: string;
         foreignColumn: string;
     } | null>;
-    rpc(procedureName: string, params?: Record<string, any>): Promise<{
-        data: any;
-        error: PostgresError | null;
-        count?: number | null;
-        status?: number;
-        statusText?: string;
-    }>;
+    rpc(procedureName: string, params?: Record<string, any>): RpcBuilder;
     testConnection(): Promise<boolean>;
     close(): Promise<void>;
 }
