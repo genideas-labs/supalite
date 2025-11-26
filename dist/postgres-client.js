@@ -1,12 +1,139 @@
 "use strict";
+var _a;
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.supalitePg = exports.SupaLitePG = void 0;
+exports.supalitePg = exports.SupaLitePG = exports.RpcBuilder = void 0;
 const pg_1 = require("pg"); // PoolConfig 추가
 const query_builder_1 = require("./query-builder");
 const errors_1 = require("./errors");
 const dotenv_1 = require("dotenv");
 // .env 파일 로드
 (0, dotenv_1.config)();
+class RpcBuilder {
+    constructor(pool, schema, procedureName, params = {}) {
+        this.pool = pool;
+        this.schema = schema;
+        this.procedureName = procedureName;
+        this.params = params;
+        this[_a] = 'RpcBuilder';
+        this.singleMode = null;
+    }
+    single() {
+        this.singleMode = 'strict';
+        return this;
+    }
+    maybeSingle() {
+        this.singleMode = 'maybe';
+        return this;
+    }
+    then(onfulfilled, onrejected) {
+        return this.execute().then(onfulfilled, onrejected);
+    }
+    catch(onrejected) {
+        return this.execute().catch(onrejected);
+    }
+    finally(onfinally) {
+        return this.execute().finally(onfinally);
+    }
+    async execute() {
+        try {
+            const paramNames = Object.keys(this.params);
+            const paramValues = Object.values(this.params);
+            const paramPlaceholders = paramNames.length > 0
+                ? paramNames.map((name, i) => `"${name}" := $${i + 1}`).join(', ')
+                : '';
+            const query = paramPlaceholders
+                ? `SELECT * FROM "${this.schema}"."${this.procedureName}"(${paramPlaceholders})`
+                : `SELECT * FROM "${this.schema}"."${this.procedureName}"()`;
+            const result = await this.pool.query(query, paramValues);
+            // Handle scalar return values (Supabase special handling)
+            // If result has 1 row and 1 column, and we are not in strict table mode (which rpc generally isn't),
+            // we check if it looks like a scalar return.
+            // However, if single() is called, we must respect row constraints.
+            let data = result.rows;
+            // Unwrapping logic for scalar functions (legacy Supabase behavior emulation)
+            // If it returns a single row with a single column, treat as scalar IF not forcing array via logic.
+            // But here we'll stick to basic row handling first, then apply singleMode.
+            // NOTE: Original logic had:
+            // if (result.rows.length === 1 && Object.keys(result.rows[0]).length === 1) { ... return single value ... }
+            // This implies unwrapping happens by default if it looks like a scalar.
+            const isScalarCandidate = result.rows.length === 1 && Object.keys(result.rows[0]).length === 1;
+            if (this.singleMode) {
+                if (result.rows.length > 1) {
+                    return {
+                        data: null,
+                        error: new errors_1.PostgresError('PGRST114: Multiple rows returned'),
+                        count: null,
+                        status: 406,
+                        statusText: 'Not Acceptable. Expected a single row but found multiple.'
+                    };
+                }
+                if (result.rows.length === 0) {
+                    if (this.singleMode === 'strict') {
+                        return {
+                            data: null,
+                            error: new errors_1.PostgresError('PGRST116: No rows found'),
+                            count: null,
+                            status: 404,
+                            statusText: 'Not Found. Expected a single row but found no rows.'
+                        };
+                    }
+                    // maybeSingle -> null data, no error
+                    return {
+                        data: null,
+                        error: null,
+                        count: 0,
+                        status: 200,
+                        statusText: 'OK'
+                    };
+                }
+                // 1 row found
+                // Check for scalar unwrapping
+                if (Object.keys(result.rows[0]).length === 1) {
+                    data = Object.values(result.rows[0])[0];
+                }
+                else {
+                    data = result.rows[0];
+                }
+                return {
+                    data,
+                    error: null,
+                    count: 1,
+                    status: 200,
+                    statusText: 'OK'
+                };
+            }
+            // Default behavior (no .single() called)
+            if (isScalarCandidate) {
+                data = Object.values(result.rows[0])[0];
+                return {
+                    data,
+                    error: null,
+                    count: 1,
+                    status: 200,
+                    statusText: 'OK'
+                };
+            }
+            return {
+                data: result.rows.length > 0 ? result.rows : null,
+                error: null,
+                count: result.rowCount,
+                status: 200,
+                statusText: 'OK'
+            };
+        }
+        catch (err) {
+            return {
+                data: null,
+                error: new errors_1.PostgresError(err.message, err.code),
+                count: null,
+                status: 500,
+                statusText: 'Internal Server Error'
+            };
+        }
+    }
+}
+exports.RpcBuilder = RpcBuilder;
+_a = Symbol.toStringTag;
 class SupaLitePG {
     constructor(config) {
         this.client = null;
@@ -220,44 +347,8 @@ class SupaLitePG {
         this.foreignKeyCache.set(cacheKey, null);
         return null;
     }
-    async rpc(procedureName, params = {}) {
-        try {
-            const paramNames = Object.keys(params);
-            const paramValues = Object.values(params);
-            const paramPlaceholders = paramNames.length > 0
-                ? paramNames.map((name, i) => `"${name}" := $${i + 1}`).join(', ')
-                : '';
-            const query = paramPlaceholders
-                ? `SELECT * FROM "${this.schema}"."${procedureName}"(${paramPlaceholders})`
-                : `SELECT * FROM "${this.schema}"."${procedureName}"()`;
-            const result = await this.pool.query(query, paramValues);
-            if (result.rows.length === 1 && Object.keys(result.rows[0]).length === 1) {
-                const singleValue = Object.values(result.rows[0])[0];
-                return {
-                    data: singleValue,
-                    error: null,
-                    count: 1,
-                    status: 200,
-                    statusText: 'OK'
-                };
-            }
-            return {
-                data: result.rows.length > 0 ? result.rows : null,
-                error: null,
-                count: result.rowCount,
-                status: 200,
-                statusText: 'OK'
-            };
-        }
-        catch (err) {
-            return {
-                data: null,
-                error: new errors_1.PostgresError(err.message, err.code),
-                count: null,
-                status: 500,
-                statusText: 'Internal Server Error'
-            };
-        }
+    rpc(procedureName, params = {}) {
+        return new RpcBuilder(this.pool, this.schema, procedureName, params);
     }
     // 연결 테스트 메서드
     async testConnection() {
