@@ -1,6 +1,6 @@
 # SupaLite
 
-[![npm version](https://img.shields.io/badge/version-0.3.3-blue.svg)](https://www.npmjs.com/package/supalite)
+[![npm version](https://img.shields.io/npm/v/supalite.svg)](https://www.npmjs.com/package/supalite)
 
 가볍고 효율적인 PostgreSQL 클라이언트 라이브러리입니다. Supabase와 동일한 API를 제공하면서도 더 가볍고 빠른 구현을 제공합니다.
 
@@ -213,6 +213,17 @@ const { data, error } = await client
   .from('users')
   .ilike('email', '%@example.com');
 
+// 관계 테이블 조회 (PostgREST-style embed)
+// 1:N 관계는 배열로 반환됩니다 (기본값: [])
+const { data: authors } = await client
+  .from('authors')
+  .select('*, books(*)');
+
+// N:1 관계는 객체로 반환됩니다 (또는 null)
+const { data: books } = await client
+  .from('books')
+  .select('*, authors(*)');
+
 // 정확한 카운트와 함께 조회
 const { data, count, error } = await client
   .from('users')
@@ -270,6 +281,7 @@ const { data, error } = await client
 - `select(columns?: string, options?: { count?: 'exact' | 'planned' | 'estimated', head?: boolean })`: 조회할 컬럼 지정
   - `options.count`: `'exact'`로 설정하면 `limit`의 영향을 받지 않는 전체 결과의 개수를 `count` 속성으로 반환합니다.
   - `options.head`: `true`로 설정하면 데이터 없이 `count`만 가져옵니다. `count` 옵션과 함께 사용하면 효율적으로 전체 개수만 조회할 수 있습니다.
+  - PostgREST-style embed: `select('*, related_table(*)')` 또는 `select('col, related_table(col1, col2)')`
 - `insert(data: T['Tables'][K]['Insert'] | T['Tables'][K]['Insert'][])`: 단일 또는 다중 레코드 삽입
 - `update(data: T['Tables'][K]['Update'])`: 레코드 업데이트
 - `delete()`: 레코드 삭제

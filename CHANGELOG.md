@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.6] - 2025-12-17
+
+### 🐞 Fixed
+- `select()`의 PostgREST-style embed(`related_table(*)`)가 **양방향 FK**를 지원하도록 개선했습니다. 이제 1:N 관계는 배열(`[]` 기본값), N:1 관계는 객체(또는 `null`)로 반환합니다. (See [docs/changelog/2025-12-17-embed-many-to-one.md](docs/changelog/2025-12-17-embed-many-to-one.md))
+
 ## [0.5.5] - 2025-11-26
 
 ### ✨ Added
