@@ -374,12 +374,24 @@ export class QueryBuilder<
             }
 
             const foreignSchemaTable = `"${String(this.schema)}"."${join.foreignTable}"`;
+            if (fk.isArray) {
+              return `(
+                SELECT COALESCE(json_agg(j), '[]'::json)
+                FROM (
+                  SELECT ${join.columns}
+                  FROM ${foreignSchemaTable}
+                  WHERE "${fk.foreignColumn}" = ${schemaTable}."${fk.column}"
+                ) as j
+              ) as "${join.foreignTable}"`;
+            }
+
             return `(
-              SELECT json_agg(j)
+              SELECT row_to_json(j)
               FROM (
                 SELECT ${join.columns}
                 FROM ${foreignSchemaTable}
                 WHERE "${fk.foreignColumn}" = ${schemaTable}."${fk.column}"
+                LIMIT 1
               ) as j
             ) as "${join.foreignTable}"`;
           })

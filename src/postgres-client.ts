@@ -388,7 +388,7 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
     schema: string,
     table: string,
     foreignTable: string
-  ): Promise<{ column: string; foreignColumn: string } | null> {
+  ): Promise<{ column: string; foreignColumn: string; isArray: boolean } | null> {
     const cacheKey = `${schema}.${table}.${foreignTable}`;
     if (this.foreignKeyCache.has(cacheKey)) {
       return this.foreignKeyCache.get(cacheKey);
@@ -413,11 +413,27 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
 
     const activeClient = this.isTransaction && this.client ? this.client : await this.pool.connect();
     try {
+      // 1) One-to-many: `foreignTable` has a foreign key referencing `table`
+      // e.g. authors <- books.author_id, so embedding books(*) on authors returns an array
       const result = await activeClient.query(query, [schema, foreignTable, table]);
       if (result.rows.length > 0) {
         const relationship = {
           column: result.rows[0].foreign_column_name,
           foreignColumn: result.rows[0].column_name,
+          isArray: true,
+        };
+        this.foreignKeyCache.set(cacheKey, relationship);
+        return relationship;
+      }
+
+      // 2) Many-to-one: `table` has a foreign key referencing `foreignTable`
+      // e.g. books.author_id -> authors.id, so embedding authors(*) on books returns an object
+      const reverseResult = await activeClient.query(query, [schema, table, foreignTable]);
+      if (reverseResult.rows.length > 0) {
+        const relationship = {
+          column: reverseResult.rows[0].column_name,
+          foreignColumn: reverseResult.rows[0].foreign_column_name,
+          isArray: false,
         };
         this.foreignKeyCache.set(cacheKey, relationship);
         return relationship;

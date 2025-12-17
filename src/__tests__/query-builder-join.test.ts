@@ -136,4 +136,50 @@ describe('QueryBuilder with Join Queries', () => {
     expect(orwell?.books[0]).toHaveProperty('title');
     expect(orwell?.books[0]).not.toHaveProperty('id');
   });
+
+  test('should fetch main records and nested referenced record (many-to-one)', async () => {
+    type BookWithAuthor = BooksTableRow & {
+      authors: AuthorsTableRow | null;
+    };
+
+    const { data, error } = await client
+      .from('books')
+      .select('*, authors(*)')
+      .order('id');
+
+    expect(error).toBeNull();
+    expect(data).not.toBeNull();
+
+    const typedData = data as BookWithAuthor[];
+    expect(typedData).toHaveLength(3);
+
+    const first = typedData[0];
+    expect(first.title).toBe('1984');
+    expect(first.authors).toBeDefined();
+    expect(Array.isArray(first.authors)).toBe(false);
+    expect(first.authors?.name).toBe('George Orwell');
+
+    const third = typedData[2];
+    expect(third.title).toBe('Pride and Prejudice');
+    expect(third.authors?.name).toBe('Jane Austen');
+  });
+
+  test('should fetch specific columns from nested referenced record (many-to-one)', async () => {
+    type BookWithAuthorName = { title: string } & {
+      authors: { name: string } | null;
+    };
+
+    const { data, error } = await client
+      .from('books')
+      .select('title, authors(name)')
+      .order('id');
+
+    expect(error).toBeNull();
+    expect(data).not.toBeNull();
+
+    const typedData = data as BookWithAuthorName[];
+    expect(typedData).toHaveLength(3);
+    expect(typedData[0].authors?.name).toBe('George Orwell');
+    expect(typedData[0].authors).not.toHaveProperty('id');
+  });
 });

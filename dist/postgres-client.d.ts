@@ -67,6 +67,7 @@ export declare class SupaLitePG<T extends {
     getForeignKey(schema: string, table: string, foreignTable: string): Promise<{
         column: string;
         foreignColumn: string;
+        isArray: boolean;
     } | null>;
     rpc(procedureName: string, params?: Record<string, any>): RpcBuilder;
     testConnection(): Promise<boolean>;
