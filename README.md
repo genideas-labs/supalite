@@ -285,7 +285,7 @@ const { data, error } = await client
 - `insert(data: T['Tables'][K]['Insert'] | T['Tables'][K]['Insert'][])`: 단일 또는 다중 레코드 삽입
 - `update(data: T['Tables'][K]['Update'])`: 레코드 업데이트
 - `delete()`: 레코드 삭제
-- `upsert(data: T['Tables'][K]['Insert'], options?: { onConflict: string })`: 삽입 또는 업데이트
+- `upsert(data: T['Tables'][K]['Insert'], options?: { onConflict: string | string[] })`: 삽입 또는 업데이트
 
 ### 필터 메소드
 

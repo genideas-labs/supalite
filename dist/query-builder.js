@@ -234,6 +234,39 @@ class QueryBuilder {
         this.conflictTarget = options?.onConflict;
         return this;
     }
+    formatConflictTarget(target) {
+        if (Array.isArray(target)) {
+            return target
+                .map((column) => this.quoteConflictTargetColumn(column))
+                .filter(Boolean)
+                .join(', ');
+        }
+        const trimmedTarget = target.trim();
+        if (!trimmedTarget) {
+            return trimmedTarget;
+        }
+        if (trimmedTarget.includes('"') || trimmedTarget.includes('(') || trimmedTarget.includes(')')) {
+            return trimmedTarget;
+        }
+        if (trimmedTarget.includes(',')) {
+            return trimmedTarget
+                .split(',')
+                .map((column) => this.quoteConflictTargetColumn(column))
+                .filter(Boolean)
+                .join(', ');
+        }
+        return this.quoteConflictTargetColumn(trimmedTarget);
+    }
+    quoteConflictTargetColumn(column) {
+        const trimmedColumn = column.trim();
+        if (!trimmedColumn) {
+            return trimmedColumn;
+        }
+        if (trimmedColumn.startsWith('"') && trimmedColumn.endsWith('"')) {
+            return trimmedColumn;
+        }
+        return `"${trimmedColumn}"`;
+    }
     shouldReturnData() {
         return this.selectColumns !== null;
     }
@@ -367,14 +400,13 @@ class QueryBuilder {
                     query = `INSERT INTO ${schemaTable} ("${insertColumns.join('","')}") VALUES (${insertPlaceholders})`;
                 }
                 if (this.queryType === 'UPSERT' && this.conflictTarget) {
-                    // Quote conflict target if it's a simple column name and not already quoted
-                    const conflictTargetSQL = (this.conflictTarget.includes('"') || this.conflictTarget.includes('(') || this.conflictTarget.includes(','))
-                        ? this.conflictTarget
-                        : `"${this.conflictTarget}"`;
-                    query += ` ON CONFLICT (${conflictTargetSQL}) DO UPDATE SET `;
-                    query += insertColumns
-                        .map((col) => `"${col}" = EXCLUDED."${col}"`)
-                        .join(', ');
+                    const conflictTargetSQL = this.formatConflictTarget(this.conflictTarget);
+                    if (conflictTargetSQL) {
+                        query += ` ON CONFLICT (${conflictTargetSQL}) DO UPDATE SET `;
+                        query += insertColumns
+                            .map((col) => `"${col}" = EXCLUDED."${col}"`)
+                            .join(', ');
+                    }
                 }
                 query += returning;
                 break;

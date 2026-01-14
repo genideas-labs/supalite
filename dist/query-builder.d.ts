@@ -57,8 +57,10 @@ export declare class QueryBuilder<T extends DatabaseSchema, S extends SchemaName
     returns<NewS extends SchemaName<T>, NewK extends TableName<T, NewS>>(): QueryBuilder<T, NewS, NewK>;
     range(from: number, to: number): this;
     upsert(values: InsertRow<T, S, K>, options?: {
-        onConflict: string;
+        onConflict: string | string[];
     }): this;
+    private formatConflictTarget;
+    private quoteConflictTargetColumn;
     private shouldReturnData;
     private buildWhereClause;
     private buildQuery;
