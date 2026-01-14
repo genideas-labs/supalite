@@ -36,7 +36,7 @@ export class QueryBuilder<
   private queryType: QueryType = 'SELECT';
   private insertData?: InsertRow<T, S, K> | InsertRow<T, S, K>[];
   private updateData?: UpdateRow<T, S, K>;
-  private conflictTarget?: string;
+  private conflictTarget?: string | string[];
   private client: SupaLitePG<T>; // Store the SupaLitePG client instance
   private verbose: boolean = false;
 
@@ -303,12 +303,51 @@ export class QueryBuilder<
 
   upsert(
     values: InsertRow<T, S, K>,
-    options?: { onConflict: string }
+    options?: { onConflict: string | string[] }
   ): this {
     this.queryType = 'UPSERT';
     this.insertData = values;
     this.conflictTarget = options?.onConflict;
     return this;
+  }
+
+  private formatConflictTarget(target: string | string[]): string {
+    if (Array.isArray(target)) {
+      return target
+        .map((column) => this.quoteConflictTargetColumn(column))
+        .filter(Boolean)
+        .join(', ');
+    }
+
+    const trimmedTarget = target.trim();
+    if (!trimmedTarget) {
+      return trimmedTarget;
+    }
+
+    if (trimmedTarget.includes('"') || trimmedTarget.includes('(') || trimmedTarget.includes(')')) {
+      return trimmedTarget;
+    }
+
+    if (trimmedTarget.includes(',')) {
+      return trimmedTarget
+        .split(',')
+        .map((column) => this.quoteConflictTargetColumn(column))
+        .filter(Boolean)
+        .join(', ');
+    }
+
+    return this.quoteConflictTargetColumn(trimmedTarget);
+  }
+
+  private quoteConflictTargetColumn(column: string): string {
+    const trimmedColumn = column.trim();
+    if (!trimmedColumn) {
+      return trimmedColumn;
+    }
+    if (trimmedColumn.startsWith('"') && trimmedColumn.endsWith('"')) {
+      return trimmedColumn;
+    }
+    return `"${trimmedColumn}"`;
   }
 
   private shouldReturnData(): boolean {
@@ -468,14 +507,13 @@ export class QueryBuilder<
         }
         
         if (this.queryType === 'UPSERT' && this.conflictTarget) {
-          // Quote conflict target if it's a simple column name and not already quoted
-          const conflictTargetSQL = (this.conflictTarget.includes('"') || this.conflictTarget.includes('(') || this.conflictTarget.includes(','))
-            ? this.conflictTarget
-            : `"${this.conflictTarget}"`;
-          query += ` ON CONFLICT (${conflictTargetSQL}) DO UPDATE SET `;
-          query += insertColumns
-            .map((col: string) => `"${col}" = EXCLUDED."${col}"`)
-            .join(', ');
+          const conflictTargetSQL = this.formatConflictTarget(this.conflictTarget);
+          if (conflictTargetSQL) {
+            query += ` ON CONFLICT (${conflictTargetSQL}) DO UPDATE SET `;
+            query += insertColumns
+              .map((col: string) => `"${col}" = EXCLUDED."${col}"`)
+              .join(', ');
+          }
         }
         
         query += returning;
