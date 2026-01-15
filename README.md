@@ -245,16 +245,17 @@ const { data, error } = await client
     }
   ]);
 
-// JSONB 배열 데이터 처리
-// 중요: JSON/JSONB 컬럼에 배열을 삽입/업데이트할 경우, 사용자가 직접 JSON.stringify()를 사용해야 합니다.
-// SupaLite는 일반 객체에 대해서만 자동 stringify를 수행합니다.
+// JSONB 배열/객체 데이터 처리
+// JSON/JSONB 컬럼은 배열/객체를 자동 stringify 합니다 (스키마 기반)
 const myJsonArray = ['tag1', 2025, { active: true }];
+const myJsonObject = { active: true, score: 10 };
 const { data: jsonData, error: jsonError } = await client
   .from('your_jsonb_table') // 'your_jsonb_table'을 실제 테이블명으로 변경
   .insert({ 
-    metadata_array: JSON.stringify(myJsonArray) // 배열은 직접 stringify
+    metadata_array: myJsonArray,
+    metadata_obj: myJsonObject
   })
-  .select('metadata_array')
+  .select('metadata_array, metadata_obj')
   .single();
 
 // 네이티브 배열(TEXT[], INTEGER[] 등) 데이터 처리
@@ -274,6 +275,228 @@ const { data, error } = await client
   .select('*');
 ```
 
+## 지원 쿼리 패턴 (테스트 기반 예시)
+
+아래 예시는 `src/__tests__`/`examples/tests`와 실제 구현을 기준으로, 현재 지원되는 쿼리 패턴을 모아둔 것입니다.
+
+### 필터
+
+```typescript
+// match: 여러 컬럼 동시 필터
+const { data: matched } = await client
+  .from('test_table')
+  .select('*')
+  .match({ name: 'test1', value: 10 });
+
+// 비교/패턴/배열/NULL 필터
+await client.from('users').select('*').eq('id', 1);
+await client.from('users').select('*').neq('status', 'inactive');
+await client.from('users').select('*').gt('age', 18);
+await client.from('users').select('*').gte('score', 80);
+await client.from('users').select('*').lt('rank', 100);
+await client.from('users').select('*').lte('rank', 10);
+await client.from('users').select('*').like('email', '%@example.com');
+await client.from('users').select('*').ilike('email', '%@example.com');
+await client.from('users').select('*').in('id', [1, 2, 3]);
+await client.from('posts').select('*').contains('tags', ['travel']);
+await client.from('profiles').select('*').is('avatar_url', null);
+
+// NOT (현재는 is null만 지원)
+await client.from('users').select('*').not('email', 'is', null);
+
+// OR 조건: '컬럼.연산자.값' 문자열 (지원 연산자: eq/neq/like/ilike/gt/gte/lt/lte/is)
+const { data: credits } = await client
+  .from('credits')
+  .select('*')
+  .eq('wallet_id', 123)
+  .gt('amount', 0)
+  .or('valid_until.is.null,valid_until.gt.now()');
+```
+
+### 정렬/페이지네이션
+
+```typescript
+await client.from('posts').select('*').order('created_at'); // ASC 기본값
+await client.from('posts').select('*').order('created_at', { ascending: false });
+
+await client.from('posts').select('*').limit(10).offset(20);
+await client.from('comments').select('*').range(1, 3);
+```
+
+### Count / Head
+
+```typescript
+const { data, count } = await client
+  .from('count_test_users')
+  .select('*', { count: 'exact' });
+
+const { data: headOnly, count: total } = await client
+  .from('count_test_users')
+  .select('*', { count: 'exact', head: true });
+```
+
+### single / maybeSingle
+
+```typescript
+const { data: user } = await client
+  .from('users')
+  .select('*')
+  .eq('id', 1)
+  .single();
+
+const { data: maybeUser } = await client
+  .from('users')
+  .select('*')
+  .eq('id', 999)
+  .maybeSingle();
+```
+
+### 관계 임베드 (PostgREST-style)
+
+```typescript
+// 1:N 관계는 배열, N:1 관계는 객체로 반환
+const { data: authors } = await client
+  .from('authors')
+  .select('*, books(*)');
+
+const { data: books } = await client
+  .from('books')
+  .select('*, authors(*)')
+  .order('id');
+
+const { data: authorNames } = await client
+  .from('authors')
+  .select('name, books(title)');
+```
+
+### 쓰기 (INSERT/UPDATE/DELETE/UPSERT)
+
+```typescript
+// INSERT (단일/다중)
+await client.from('users').insert({ name: 'User', email: 'user@example.com' });
+await client.from('users').insert([
+  { name: 'User A', email: 'a@example.com' },
+  { name: 'User B', email: 'b@example.com' }
+]).select();
+
+// UPDATE + IS NULL
+await client
+  .from('order_menu_items')
+  .update({ order_closed_time: new Date().toISOString(), last_act_member_owner_id: 123 })
+  .eq('table_name', 'test_table')
+  .eq('menu_id', 456)
+  .is('order_closed_time', null)
+  .select();
+
+// DELETE
+await client.from('posts').delete().eq('user_id', 1).select();
+
+// UPSERT (onConflict: string/array)
+await client
+  .from('profiles')
+  .upsert({ user_id: 1, bio: 'hello' }, { onConflict: 'user_id' })
+  .select();
+
+await client
+  .from('menu_item_opts_schema')
+  .upsert({ set_id: 1, name: 'Soup' }, { onConflict: 'set_id, name' })
+  .select();
+
+await client
+  .from('ext_menu_item_section_change')
+  .upsert({ ext_menu_id: 10, ext_menu_item_id: 20 }, { onConflict: ['ext_menu_id', 'ext_menu_item_id'] });
+```
+
+### 데이터 타입 (JSONB/배열/BigInt)
+
+```typescript
+// JSONB (배열/객체 자동 stringify)
+await client
+  .from('jsonb_test_table')
+  .insert({ jsonb_data: ['string', 123, { nested: true }], another_json_field: { key: 'value' } })
+  .select('jsonb_data, another_json_field')
+  .single();
+
+// Native arrays (TEXT[], INTEGER[])
+await client
+  .from('native_array_test_table')
+  .insert({ tags: ['alpha', 'beta'], scores: [10, 20] })
+  .select('tags, scores')
+  .single();
+
+await client
+  .from('native_array_test_table')
+  .update({ tags: ['updated_tag'] })
+  .eq('id', 1)
+  .select('tags')
+  .single();
+
+await client
+  .from('native_array_test_table')
+  .select('id')
+  .contains('tags', ['initial_tag1'])
+  .single();
+
+// BigInt
+await client
+  .from('bigint_test_table')
+  .insert({ bigint_value: 8000000000000000000n })
+  .select()
+  .single();
+
+await client
+  .from('bigint_test_table')
+  .select('id, bigint_value')
+  .eq('bigint_value', 1234567890123456789n)
+  .single();
+```
+
+### 예약어 컬럼
+
+```typescript
+const { data: reserved } = await client
+  .from('reserved_keyword_test_table')
+  .select('id, order, desc, user, limit, group')
+  .eq('order', 100)
+  .order('order', { ascending: false });
+```
+
+### RPC
+
+```typescript
+const { data: rows } = await client.rpc('get_users');
+
+const { data: singleUser } = await client
+  .rpc('get_user')
+  .single();
+
+const { data: maybeUser } = await client
+  .rpc('get_user')
+  .maybeSingle();
+
+const { data: count } = await client.rpc('get_count'); // 스칼라 반환
+```
+
+### 트랜잭션
+
+```typescript
+await client.transaction(async (tx) => {
+  const { data: user } = await tx
+    .from('users')
+    .insert({ name: '홍길동', email: 'hong@example.com' })
+    .select()
+    .single();
+
+  if (!user?.id) {
+    throw new Error('Failed to create user');
+  }
+
+  await tx
+    .from('profiles')
+    .insert({ user_id: user.id, bio: '트랜잭션 프로필' });
+});
+```
+
 ## API 문서
 
 ### 쿼리 메소드
@@ -289,6 +512,7 @@ const { data, error } = await client
 
 ### 필터 메소드
 
+- `match(conditions)`: 여러 컬럼을 한 번에 eq 처리 (예: `match({ status: 'active', role: 'admin' })`)
 - `eq(column, value)`: 같음
 - `neq(column, value)`: 같지 않음
 - `gt(column, value)`: 보다 큼
@@ -299,9 +523,9 @@ const { data, error } = await client
 - `ilike(column, pattern)`: 대소문자 구분 없는 LIKE
 - `in(column, values)`: IN 연산자
 - `is(column, value)`: IS 연산자
-- `not(column, operator, value)`: Negates an operator (e.g., `not('column', 'is', null)`).
+- `not(column, operator, value)`: 현재는 `not('column', 'is', null)`만 지원 (IS NOT NULL)
 - `contains(column, value)`: 배열/JSON 포함 여부
-- `or(conditions)`: OR 조건 (예: 'status.eq.active,role.eq.admin', 'valid_until.is.null')
+- `or(conditions)`: OR 조건 문자열 (지원 연산자: eq/neq/like/ilike/gt/gte/lt/lte/is)
 
 ### 기타 메소드
 
