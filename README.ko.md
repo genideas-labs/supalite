@@ -18,6 +18,16 @@
 - 📚 배열 작업: 다중 레코드 삽입 및 배열 데이터 처리 (JSON/JSONB 필드 포함)
 - 🔄 Views, Functions, Enums 지원: Supabase 스타일의 완벽한 타입 지원
 
+## 프로젝트 범위
+
+SupaLite는 Supabase 클라이언트의 **일부 기능(쿼리 빌더, RPC, 트랜잭션)**에 집중합니다. Auth/Storage/Realtime 같은 기능까지 포함하는 전체 호환을 목표로 하지는 않습니다. 지원되는 쿼리 패턴은 아래에 정리되어 있으며, 빠진 패턴이 있으면 이슈로 알려주세요.
+
+## 로드맵 (단기)
+
+- Node/pg 버전별 CI 매트릭스와 통합 테스트
+- 벤치마크 및 성능 가이드
+- 기여 가이드/이슈 템플릿
+
 ## 설치 방법
 
 ```bash
@@ -932,6 +942,10 @@ npm test
 # 빌드
 npm run build
 ```
+
+## 기여하기
+
+이슈와 PR을 환영합니다. 큰 변경은 먼저 이슈로 방향을 맞춰 주세요. 테스트는 로컬 Postgres(또는 `DB_CONNECTION`)가 필요하며, 배포 전 `npm run build`, `npm test`, `npm run lint`를 실행합니다.
 
 ## 라이선스
 

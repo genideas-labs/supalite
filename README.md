@@ -19,6 +19,16 @@ A lightweight and efficient PostgreSQL client library. It mirrors the Supabase A
 - Array support: multi-row inserts and array fields (JSON/JSONB included)
 - Views, Functions, Enums: full Supabase-style typing
 
+## Project Scope
+
+SupaLite targets a focused subset of the Supabase client: query builder, RPC, and transactions. It does not aim for full Supabase feature parity (auth/storage/realtime). The supported query patterns are documented below; if a pattern is missing, please open an issue so we can prioritize it.
+
+## Roadmap (near-term)
+
+- CI matrix for Node/pg versions with integration tests
+- Benchmarks and performance guidance
+- Contribution guide and issue templates
+
 ## Installation
 
 ```bash
@@ -925,6 +935,10 @@ npm test
 # build
 npm run build
 ```
+
+## Contributing
+
+Issues and PRs are welcome. For larger changes, please open an issue first to align on scope. Tests expect a local Postgres (or `DB_CONNECTION`), and we run `npm run build`, `npm test`, and `npm run lint` before publishing.
 
 ## License
 
