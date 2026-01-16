@@ -6,7 +6,7 @@
 [![license](https://img.shields.io/npm/l/supalite.svg)](LICENSE)
 [![types](https://img.shields.io/npm/types/supalite.svg)](https://www.npmjs.com/package/supalite)
 [![node](https://img.shields.io/node/v/supalite.svg)](https://www.npmjs.com/package/supalite)
-[![ci](https://github.com/genideas-labs/supalite/actions/workflows/ci.yml/badge.svg)](https://github.com/genideas-labs/supalite/actions/workflows/ci.yml)
+[![ci](https://img.shields.io/github/actions/workflow/status/genideas-labs/supalite/ci.yml?branch=main)](https://github.com/genideas-labs/supalite/actions/workflows/ci.yml)
 
 A lightweight PostgreSQL client focused on the Supabase query builder. It keeps the familiar API but trims the surface area so you get a smaller footprint and less overhead in production.
 

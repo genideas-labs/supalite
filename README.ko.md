@@ -5,7 +5,7 @@
 [![license](https://img.shields.io/npm/l/supalite.svg)](LICENSE)
 [![types](https://img.shields.io/npm/types/supalite.svg)](https://www.npmjs.com/package/supalite)
 [![node](https://img.shields.io/node/v/supalite.svg)](https://www.npmjs.com/package/supalite)
-[![ci](https://github.com/genideas-labs/supalite/actions/workflows/ci.yml/badge.svg)](https://github.com/genideas-labs/supalite/actions/workflows/ci.yml)
+[![ci](https://img.shields.io/github/actions/workflow/status/genideas-labs/supalite/ci.yml?branch=main)](https://github.com/genideas-labs/supalite/actions/workflows/ci.yml)
 
 Supabase 쿼리 빌더에 집중한 가벼운 PostgreSQL 클라이언트입니다. 익숙한 API를 유지하면서도 표면적을 줄여 더 작은 풋프린트와 낮은 오버헤드를 목표로 합니다.
 
