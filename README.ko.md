@@ -40,10 +40,76 @@ Supabase에서 완전히 분리하려면 SupaLite는 **DB 쿼리 계층만** 대
 - 🔍 고급 필터링: OR 조건, ILIKE 검색 등 지원
 - 📚 배열 작업: 다중 레코드 삽입 및 배열 데이터 처리 (JSON/JSONB 필드 포함)
 - 🔄 Views, Functions, Enums 지원: Supabase 스타일의 완벽한 타입 지원
+- 🧮 BigInt 대응: JSON 안전 변환 옵션 제공
 
 ## 프로젝트 범위
 
 SupaLite는 Supabase 클라이언트의 **일부 기능(쿼리 빌더, RPC, 트랜잭션)**에 집중합니다. Auth/Storage/Realtime 같은 기능까지 포함하는 전체 호환을 목표로 하지는 않습니다. 지원되는 쿼리 패턴은 아래에 정리되어 있으며, 빠진 패턴이 있으면 이슈로 알려주세요.
+
+## SupaLite vs Prisma / Drizzle
+
+SupaLite는 SQL에 가까운 가벼운 쿼리 클라이언트입니다. Prisma/Drizzle은 스키마 중심의 ORM과 마이그레이션을 제공합니다.
+
+SupaLite가 적합한 경우:
+- 최소한의 추상화로 쿼리 레이어만 얇게 두고 싶을 때
+- Supabase에서 이동하면서 유사한 쿼리 문법을 유지하고 싶을 때
+- 마이그레이션과 스키마 관리는 별도로 하고 있을 때
+
+Prisma/Drizzle이 적합한 경우:
+- 스키마 중심 모델링과 내장 마이그레이션이 필요할 때
+- 관계/중첩 쓰기 등 ORM 기능을 적극 활용할 때
+- 스키마 파일 기반의 강한 타입 보장을 원할 때
+
+트레이드오프:
+- SupaLite는 간단하고 SQL에 가깝지만 ORM 모델링/마이그레이션 도구는 없습니다.
+- Prisma/Drizzle은 기능이 풍부한 대신 추상화 레이어가 추가됩니다.
+- SupaLite는 BIGINT를 JSON 안전하게 변환하는 옵션을 기본 제공한다는 점이 장점입니다.
+- Prisma/Drizzle은 BIGINT의 JSON 직렬화/정밀도 선택을 호출부에서 처리해야 하는 경우가 많지만, SupaLite는 `bigintTransform`으로 일관되게 설정할 수 있습니다.
+
+## 예제 비교 (SupaLite vs Prisma vs Drizzle)
+
+SupaLite는 Supabase 스타일 네이밍을 유지해 SQL과 유사하게 읽히도록 설계했습니다. 아래는 동일 쿼리의 비교입니다.
+
+작업: `status = 'active'` 사용자 조회, `created_at` 내림차순, 2페이지(페이지당 10건).
+
+SupaLite:
+```typescript
+const page = 2;
+const pageSize = 10;
+const { data } = await client
+  .from('users')
+  .select('id, name, email, created_at')
+  .eq('status', 'active')
+  .order('created_at', { ascending: false })
+  .limit(pageSize)
+  .offset((page - 1) * pageSize);
+```
+
+Prisma:
+```typescript
+const page = 2;
+const pageSize = 10;
+const data = await prisma.user.findMany({
+  select: { id: true, name: true, email: true, created_at: true },
+  where: { status: 'active' },
+  orderBy: { created_at: 'desc' },
+  take: pageSize,
+  skip: (page - 1) * pageSize,
+});
+```
+
+Drizzle:
+```typescript
+const page = 2;
+const pageSize = 10;
+const data = await db
+  .select({ id: users.id, name: users.name, email: users.email, created_at: users.createdAt })
+  .from(users)
+  .where(eq(users.status, 'active'))
+  .orderBy(desc(users.createdAt))
+  .limit(pageSize)
+  .offset((page - 1) * pageSize);
+```
 
 ## 로드맵 (단기)
 

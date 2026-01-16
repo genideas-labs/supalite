@@ -41,10 +41,76 @@ If you are moving off Supabase, SupaLite replaces only the **DB query layer**. Y
 - Advanced filtering: OR conditions, ILIKE, and more
 - Array support: multi-row inserts and array fields (JSON/JSONB included)
 - Views, Functions, Enums: full Supabase-style typing
+- BigInt handling: configurable transforms for JSON-safe values
 
 ## Project Scope
 
 SupaLite targets a focused subset of the Supabase client: query builder, RPC, and transactions. It does not aim for full Supabase feature parity (auth/storage/realtime). The supported query patterns are documented below; if a pattern is missing, please open an issue so we can prioritize it.
+
+## SupaLite vs Prisma / Drizzle
+
+SupaLite is a lightweight SQL-first client with a Supabase-style query builder. Prisma and Drizzle are ORMs with schema-first workflows and migrations.
+
+When SupaLite fits best:
+- You want a thin query layer with minimal abstraction.
+- You are migrating from Supabase and want similar query ergonomics.
+- You handle migrations and schema management separately.
+
+When Prisma or Drizzle fits best:
+- You want schema-first modeling and built-in migrations.
+- You want richer ORM features (relations, nested writes, generated client APIs).
+- You want stronger compile-time guarantees tied to a schema file.
+
+Trade-offs:
+- SupaLite is simpler and closer to SQL, but does not provide ORM-level modeling or migration tooling.
+- Prisma/Drizzle add features and structure, with some abstraction overhead.
+- SupaLite includes built-in BIGINT transform options for JSON-safe output.
+- Prisma/Drizzle still require manual decisions for BIGINT (JSON serialization vs precision), while SupaLite centralizes it with `bigintTransform`.
+
+## Example comparison (SupaLite vs Prisma vs Drizzle)
+
+SupaLite keeps Supabase-style naming so the query reads close to SQL. Below is the same query in each tool:
+
+Task: fetch active users, ordered by `created_at` desc, page 2 (10 per page).
+
+SupaLite:
+```typescript
+const page = 2;
+const pageSize = 10;
+const { data } = await client
+  .from('users')
+  .select('id, name, email, created_at')
+  .eq('status', 'active')
+  .order('created_at', { ascending: false })
+  .limit(pageSize)
+  .offset((page - 1) * pageSize);
+```
+
+Prisma:
+```typescript
+const page = 2;
+const pageSize = 10;
+const data = await prisma.user.findMany({
+  select: { id: true, name: true, email: true, created_at: true },
+  where: { status: 'active' },
+  orderBy: { created_at: 'desc' },
+  take: pageSize,
+  skip: (page - 1) * pageSize,
+});
+```
+
+Drizzle:
+```typescript
+const page = 2;
+const pageSize = 10;
+const data = await db
+  .select({ id: users.id, name: users.name, email: users.email, created_at: users.createdAt })
+  .from(users)
+  .where(eq(users.status, 'active'))
+  .orderBy(desc(users.createdAt))
+  .limit(pageSize)
+  .offset((page - 1) * pageSize);
+```
 
 ## Roadmap (near-term)
 
