@@ -112,6 +112,16 @@ const client = new SupaLitePG<Database>({
 });
 ```
 
+```typescript
+import { SupaliteClient } from 'supalite';
+import { Database } from './types/database';
+
+// SupaliteClient는 SupaLitePG의 얇은 래퍼입니다.
+const client = new SupaliteClient<Database>({
+  connectionString: process.env.DB_CONNECTION || 'postgresql://user:pass@localhost:5432/db',
+});
+```
+
 ### 기본 CRUD 작업
 
 ```typescript
@@ -298,6 +308,9 @@ await client.from('users').select('*').lte('rank', 10);
 await client.from('users').select('*').like('email', '%@example.com');
 await client.from('users').select('*').ilike('email', '%@example.com');
 await client.from('users').select('*').in('id', [1, 2, 3]);
+await client.from('users').select('*').in('id', []); // 결과 없음 (WHERE FALSE)
+await client.from('posts').select('*').in('user_id', [1, null, 3]);
+await client.from('posts').select('*').in('user_id', [1, 2]).in('views', [50, 100, 150]);
 await client.from('posts').select('*').contains('tags', ['travel']);
 await client.from('profiles').select('*').is('avatar_url', null);
 
@@ -321,6 +334,14 @@ await client.from('posts').select('*').order('created_at', { ascending: false })
 
 await client.from('posts').select('*').limit(10).offset(20);
 await client.from('comments').select('*').range(1, 3);
+
+const page = 2;
+const pageSize = 10;
+await client
+  .from('posts')
+  .select('*')
+  .limit(pageSize)
+  .offset((page - 1) * pageSize);
 ```
 
 ### Count / Head
@@ -333,7 +354,19 @@ const { data, count } = await client
 const { data: headOnly, count: total } = await client
   .from('count_test_users')
   .select('*', { count: 'exact', head: true });
+
+const { data: limited, count: totalLimited } = await client
+  .from('count_test_users')
+  .select('*', { count: 'exact' })
+  .limit(3);
+
+const { data: ranged, count: totalRanged } = await client
+  .from('count_test_users')
+  .select('*', { count: 'exact' })
+  .range(2, 5);
 ```
+
+`count: 'exact'` 사용 시 결과 행에는 `exact_count` 컬럼이 포함되지 않습니다. `limit`/`range`를 사용해도 `count`는 전체 개수를 반환하며, `head: true`는 `data: []`를 반환합니다.
 
 ### single / maybeSingle
 
@@ -349,7 +382,15 @@ const { data: maybeUser } = await client
   .select('*')
   .eq('id', 999)
   .maybeSingle();
+
+const { data: multiRow, error: multiRowError } = await client
+  .from('test_table_for_multi_row')
+  .select('*')
+  .eq('group_key', 'groupA')
+  .single();
 ```
+
+`single()`은 결과가 0개면 에러(PGRST116), 2개 이상이면 에러(PGRST114)입니다. `maybeSingle()`은 0개면 `data: null` + `error: null`을 반환하며, 2개 이상이면 에러(PGRST114)입니다.
 
 ### 관계 임베드 (PostgREST-style)
 
@@ -367,6 +408,11 @@ const { data: books } = await client
 const { data: authorNames } = await client
   .from('authors')
   .select('name, books(title)');
+
+const { data: bookAuthors } = await client
+  .from('books')
+  .select('title, authors(name)')
+  .order('id');
 ```
 
 ### 쓰기 (INSERT/UPDATE/DELETE/UPSERT)
@@ -391,6 +437,12 @@ await client
 // DELETE
 await client.from('posts').delete().eq('user_id', 1).select();
 
+// DELETE + IN
+await client
+  .from('users')
+  .delete()
+  .in('email', ['a@example.com', 'b@example.com']);
+
 // UPSERT (onConflict: string/array)
 await client
   .from('profiles')
@@ -407,6 +459,8 @@ await client
   .upsert({ ext_menu_id: 10, ext_menu_item_id: 20 }, { onConflict: ['ext_menu_id', 'ext_menu_item_id'] });
 ```
 
+빈 배열 `insert([])`는 `Empty array provided for insert` 에러가 발생합니다.
+
 ### 데이터 타입 (JSONB/배열/BigInt)
 
 ```typescript
@@ -417,10 +471,22 @@ await client
   .select('jsonb_data, another_json_field')
   .single();
 
+await client
+  .from('jsonb_test_table')
+  .insert({ jsonb_data: [] })
+  .select('jsonb_data')
+  .single();
+
 // Native arrays (TEXT[], INTEGER[])
 await client
   .from('native_array_test_table')
   .insert({ tags: ['alpha', 'beta'], scores: [10, 20] })
+  .select('tags, scores')
+  .single();
+
+await client
+  .from('native_array_test_table')
+  .insert({ tags: [], scores: [] })
   .select('tags, scores')
   .single();
 
@@ -437,10 +503,29 @@ await client
   .contains('tags', ['initial_tag1'])
   .single();
 
+await client
+  .from('native_array_test_table')
+  .insert({ tags: null, scores: null })
+  .select('tags, scores')
+  .single();
+
 // BigInt
 await client
   .from('bigint_test_table')
   .insert({ bigint_value: 8000000000000000000n })
+  .select()
+  .single();
+
+await client
+  .from('bigint_test_table')
+  .update({ bigint_value: 7000000000000000000n })
+  .eq('id', 2)
+  .select()
+  .single();
+
+await client
+  .from('bigint_test_table')
+  .insert({ bigint_value: null })
   .select()
   .single();
 
@@ -459,7 +544,47 @@ const { data: reserved } = await client
   .select('id, order, desc, user, limit, group')
   .eq('order', 100)
   .order('order', { ascending: false });
+
+const { data: insertedReserved } = await client
+  .from('reserved_keyword_test_table')
+  .insert({ order: 300, desc: 'Description D', user: 'user_d', limit: 30, group: 'group_y' })
+  .select()
+  .single();
+
+const { data: updatedReserved } = await client
+  .from('reserved_keyword_test_table')
+  .update({ desc: 'Updated Description A', limit: 15 })
+  .eq('order', 100)
+  .select()
+  .single();
+
+const { data: upsertReserved } = await client
+  .from('reserved_keyword_test_table')
+  .upsert({ order: 500, desc: 'Upserted', user: 'user_e', limit: 51, group: 'group_z' }, { onConflict: 'order' })
+  .select()
+  .single();
 ```
+
+### 뷰 테이블
+
+```typescript
+const { data: userPosts } = await client
+  .from('user_posts_view')
+  .select('*');
+
+const { data: activeUsers } = await client
+  .from('active_users_view')
+  .select('*')
+  .gte('post_count', 2);
+
+const { data: singlePost } = await client
+  .from('user_posts_view')
+  .select('*')
+  .eq('post_id', 1)
+  .single();
+```
+
+뷰는 읽기 전용이며, Insert/Update는 타입 단계에서 제한됩니다.
 
 ### RPC
 
@@ -475,6 +600,21 @@ const { data: maybeUser } = await client
   .maybeSingle();
 
 const { data: count } = await client.rpc('get_count'); // 스칼라 반환
+
+const { data: countSingle } = await client
+  .rpc('get_count')
+  .single();
+
+const { data: tableExists } = await client
+  .rpc('check_table_exists', { table_name: 'code_routes' });
+
+const { data: noneRpc, error: noneRpcError } = await client
+  .rpc('get_user')
+  .single();
+
+const { data: manyRpc, error: manyRpcError } = await client
+  .rpc('get_user')
+  .maybeSingle();
 ```
 
 ### 트랜잭션
@@ -495,6 +635,13 @@ await client.transaction(async (tx) => {
     .from('profiles')
     .insert({ user_id: user.id, bio: '트랜잭션 프로필' });
 });
+```
+
+### 연결 확인
+
+```typescript
+const isConnected = await client.testConnection();
+await client.close();
 ```
 
 ## API 문서
@@ -544,6 +691,11 @@ await client.transaction(async (tx) => {
 - `commit()`: 트랜잭션 커밋
 - `rollback()`: 트랜잭션 롤백
 
+### 클라이언트 메소드
+
+- `testConnection()`: 데이터베이스 연결 확인
+- `close()`: 커넥션 풀 종료
+
 ## 환경 변수 설정
 
 데이터베이스 연결을 위해 다음 환경 변수를 설정할 수 있습니다:
@@ -585,14 +737,25 @@ DB_SSL=true
 모든 쿼리 메소드는 다음과 같은 형식의 응답을 반환합니다:
 
 ```typescript
-interface QueryResponse<T> {
-  data: T | null;        // 쿼리 결과 데이터
+interface QueryResult<T> {
+  data: Array<T>;        // 쿼리 결과 데이터 (없으면 빈 배열)
   error: Error | null;   // 에러 정보
-  count?: number;        // 결과 레코드 수
+  count: number | null;  // 결과 레코드 수
+  status: number;        // HTTP 상태 코드
+  statusText: string;    // 상태 메시지
+}
+
+interface SingleQueryResult<T> {
+  data: T | null;        // 단일 결과 (없으면 null)
+  error: Error | null;   // 에러 정보
+  count: number | null;  // 결과 레코드 수
   status: number;        // HTTP 상태 코드
   statusText: string;    // 상태 메시지
 }
 ```
+
+- `QueryResult.data`는 항상 배열이며, 결과 없음/에러 시 빈 배열입니다.
+- `SingleQueryResult.data`는 결과 없음/에러 시 `null`입니다.
 
 ## 개발 환경 설정
 
