@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.6.2] - 2026-01-17
+## [0.7.0] - 2026-01-17
 
 ### ✨ Added
 - `supalite gen types` CLI to generate TypeScript Database types from PostgreSQL schemas.
