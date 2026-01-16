@@ -47,6 +47,19 @@ If you are moving off Supabase, SupaLite replaces only the **DB query layer**. Y
 
 SupaLite targets a focused subset of the Supabase client: query builder, RPC, and transactions. It does not aim for full Supabase feature parity (auth/storage/realtime). The supported query patterns are documented below; if a pattern is missing, please open an issue so we can prioritize it.
 
+## Migrations and schema management
+
+SupaLite is intentionally ORM-light. For schema management and migrations, use dedicated tools:
+- Migrations/schema sync: [pg-schema-sync](https://github.com/genideas-labs/pg-schema-sync)
+- Alternatives: Atlas, dbmate, Sqitch, Goose, Flyway
+- Type generation: `supabase gen types typescript --db-url <postgres_url>` (works with just a DB URL)
+
+ORM features (relations, nested writes, etc.) are best handled by Prisma/Drizzle/Kysely in a separate service when needed. Keeping SupaLite light is part of the value.
+
+About `supabase db pull`: it is a schema/migration sync step, not an ORM feature. Rather than implementing it inside SupaLite, we recommend documenting the workflow and optionally providing a lightweight CLI wrapper that combines `pg-schema-sync` + type generation.
+
+If a SupaLite-native type generator makes sense, we can add a `supalite gen types` CLI in the roadmap.
+
 ## SupaLite vs Prisma / Drizzle
 
 SupaLite is a lightweight SQL-first client with a Supabase-style query builder. Prisma and Drizzle are ORMs with schema-first workflows and migrations.
@@ -117,6 +130,7 @@ const data = await db
 - CI matrix for Node/pg versions with integration tests
 - Benchmarks and performance guidance
 - Auth/Storage/Realtime migration guidance (Cognito/GIP, S3/GCS, Realtime options)
+- `supalite gen types` (Supabase-compatible type generator)
 - Contribution guide and issue templates
 
 ## Performance notes (serverless Supabase vs cloud Postgres)

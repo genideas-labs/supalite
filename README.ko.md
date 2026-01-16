@@ -46,6 +46,19 @@ Supabase에서 완전히 분리하려면 SupaLite는 **DB 쿼리 계층만** 대
 
 SupaLite는 Supabase 클라이언트의 **일부 기능(쿼리 빌더, RPC, 트랜잭션)**에 집중합니다. Auth/Storage/Realtime 같은 기능까지 포함하는 전체 호환을 목표로 하지는 않습니다. 지원되는 쿼리 패턴은 아래에 정리되어 있으며, 빠진 패턴이 있으면 이슈로 알려주세요.
 
+## 마이그레이션 및 스키마 관리
+
+SupaLite는 ORM을 최소화합니다. 마이그레이션/스키마 관리는 전용 도구를 사용하는 것이 현실적입니다.
+- 마이그레이션/스키마 동기화: [pg-schema-sync](https://github.com/genideas-labs/pg-schema-sync)
+- 대안: Atlas, dbmate, Sqitch, Goose, Flyway
+- 타입 생성: `supabase gen types typescript --db-url <postgres_url>` (DB URL만 있어도 가능)
+
+ORM 기능(관계 모델링/중첩 쓰기 등)이 꼭 필요하면 Prisma/Drizzle/Kysely를 별도 서비스로 병행하는 방식을 권장합니다. SupaLite를 가볍게 유지하는 것이 핵심 가치입니다.
+
+`supabase db pull`에 대해서: 이는 ORM 기능이 아니라 마이그레이션/스키마 동기화 단계입니다. SupaLite 내부에 구현하기보다 “권장 워크플로우”로 문서화하고, 필요하다면 `pg-schema-sync` + 타입 생성기를 묶는 간단한 CLI 래퍼가 현실적입니다.
+
+SupaLite용 타입 생성기가 필요하다면 `supalite gen types` CLI를 로드맵에 추가할 수 있습니다.
+
 ## SupaLite vs Prisma / Drizzle
 
 SupaLite는 SQL에 가까운 가벼운 쿼리 클라이언트입니다. Prisma/Drizzle은 스키마 중심의 ORM과 마이그레이션을 제공합니다.
@@ -116,6 +129,7 @@ const data = await db
 - Node/pg 버전별 CI 매트릭스와 통합 테스트
 - 벤치마크 및 성능 가이드
 - Auth/Storage/Realtime 마이그레이션 가이드 (Cognito/GIP, S3/GCS, Realtime 대안)
+- `supalite gen types` (Supabase 호환 타입 생성기)
 - 기여 가이드/이슈 템플릿
 
 ## 성능 노트 (서버리스 Supabase vs 클라우드 Postgres)
