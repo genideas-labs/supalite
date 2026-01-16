@@ -5,7 +5,7 @@
 [![license](https://img.shields.io/npm/l/supalite.svg)](LICENSE)
 [![types](https://img.shields.io/npm/types/supalite.svg)](https://www.npmjs.com/package/supalite)
 [![node](https://img.shields.io/node/v/supalite.svg)](https://www.npmjs.com/package/supalite)
-[![ci](https://img.shields.io/badge/CI-planned-lightgrey.svg)](https://github.com/genideas-labs/supalite/actions)
+[![ci](https://github.com/genideas-labs/supalite/actions/workflows/ci.yml/badge.svg)](https://github.com/genideas-labs/supalite/actions/workflows/ci.yml)
 
 Supabase 쿼리 빌더에 집중한 가벼운 PostgreSQL 클라이언트입니다. 익숙한 API를 유지하면서도 표면적을 줄여 더 작은 풋프린트와 낮은 오버헤드를 목표로 합니다.
 
@@ -60,6 +60,8 @@ SupaLite는 Supabase 클라이언트의 **일부 기능(쿼리 빌더, RPC, 트�
 - 오버헤드: HTTP/PostgREST 계층 직렬화 비용이 추가되며, 직접 SQL 클라이언트는 이를 줄입니다.
 
 벤치마크 수치: **TBD (출처 필요)**. 공개된 벤치마크 링크가 있으면 PR로 공유해 주세요.
+필요한 출처:
+- 서버리스 Postgres vs 관리형 Postgres 지연/풀링 비교에 대한 공개 자료 링크
 
 ## 벤치마크 방법론 (초안)
 

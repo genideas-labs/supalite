@@ -6,7 +6,7 @@
 [![license](https://img.shields.io/npm/l/supalite.svg)](LICENSE)
 [![types](https://img.shields.io/npm/types/supalite.svg)](https://www.npmjs.com/package/supalite)
 [![node](https://img.shields.io/node/v/supalite.svg)](https://www.npmjs.com/package/supalite)
-[![ci](https://img.shields.io/badge/CI-planned-lightgrey.svg)](https://github.com/genideas-labs/supalite/actions)
+[![ci](https://github.com/genideas-labs/supalite/actions/workflows/ci.yml/badge.svg)](https://github.com/genideas-labs/supalite/actions/workflows/ci.yml)
 
 A lightweight PostgreSQL client focused on the Supabase query builder. It keeps the familiar API but trims the surface area so you get a smaller footprint and less overhead in production.
 
@@ -61,6 +61,8 @@ General differences you can expect when moving off serverless Supabase to a mana
 - Overhead: HTTP/PostgREST layers add serialization cost; direct SQL clients minimize that overhead.
 
 Benchmarks and numbers: **TBD (source needed)**. If you have public benchmarks, please open a PR with sources.
+Sources needed:
+- Links to public benchmarks/blogs/docs comparing serverless Postgres vs managed Postgres latency and pooling.
 
 ## Benchmark methodology (draft)
 

@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+      - name: Initialize test database
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -f setup-postgres-test.sql
+
+      - run: npm run build
+      - run: npm test
+        env:
+          DB_CONNECTION: postgresql://testuser:testpassword@localhost:5432/testdb
+      - run: npm run lint
