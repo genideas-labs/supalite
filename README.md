@@ -1,4 +1,5 @@
 # SupaLite
+If Supabase feels slow due to serverless latency, SupaLite can be a faster alternative for database queries.
 [한국어 README](README.ko.md)
 
 [![npm version](https://img.shields.io/npm/v/supalite.svg)](https://www.npmjs.com/package/supalite)

@@ -1,4 +1,5 @@
 # SupaLite
+Supabase가 서버리스 지연으로 느리게 느껴진다면, DB 쿼리에는 SupaLite가 더 빠른 대안이 될 수 있습니다.
 
 [![npm version](https://img.shields.io/npm/v/supalite.svg)](https://www.npmjs.com/package/supalite)
 [![npm downloads](https://img.shields.io/npm/dm/supalite.svg)](https://www.npmjs.com/package/supalite)
