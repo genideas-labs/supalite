@@ -1,8 +1,30 @@
 # SupaLite
 
 [![npm version](https://img.shields.io/npm/v/supalite.svg)](https://www.npmjs.com/package/supalite)
+[![npm downloads](https://img.shields.io/npm/dm/supalite.svg)](https://www.npmjs.com/package/supalite)
+[![license](https://img.shields.io/npm/l/supalite.svg)](LICENSE)
+[![types](https://img.shields.io/npm/types/supalite.svg)](https://www.npmjs.com/package/supalite)
+[![node](https://img.shields.io/node/v/supalite.svg)](https://www.npmjs.com/package/supalite)
+[![ci](https://img.shields.io/badge/CI-planned-lightgrey.svg)](https://github.com/genideas-labs/supalite/actions)
 
-가볍고 효율적인 PostgreSQL 클라이언트 라이브러리입니다. Supabase와 동일한 API를 제공하면서도 더 가볍고 빠른 구현을 제공합니다.
+Supabase 쿼리 빌더에 집중한 가벼운 PostgreSQL 클라이언트입니다. 익숙한 API를 유지하면서도 표면적을 줄여 더 작은 풋프린트와 낮은 오버헤드를 목표로 합니다.
+
+한 줄 요약: **SupaLite는 쿼리 빌더 + RPC + 트랜잭션에 집중한 슬림 Supabase 클라이언트입니다.** Auth/Storage/Realtime까지 필요하면 `supabase-js`를 사용하세요.
+
+실서비스 사용: [oqoq.ai](https://oqoq.ai)
+
+호환 범위 요약:
+- ✅ 조회/필터/정렬/페이지네이션
+- ✅ PostgREST 임베드 (`related_table(*)`, `!inner`)
+- ✅ Insert/Update/Delete/Upsert (`ignoreDuplicates` 포함)
+- ✅ RPC (`single`/`maybeSingle` 포함)
+- ❌ Auth/Storage/Realtime
+
+클라우드 마이그레이션 안내 (GCP/AWS):
+Supabase에서 완전히 분리하려면 SupaLite는 **DB 쿼리 계층만** 대체합니다. Auth/Storage/Realtime은 별도 대안이 필요합니다.
+- Auth: 관리형 인증(AWS Cognito / Google Identity Platform) 또는 자체 호스팅(GoTrue/Keycloak)
+- Storage: 오브젝트 스토리지(S3 / GCS)
+- Realtime: 관리형 pub/sub, WebSocket 서비스, 또는 PostgreSQL LISTEN/NOTIFY + 자체 게이트웨이
 
 ## 주요 기능
 
@@ -26,7 +48,26 @@ SupaLite는 Supabase 클라이언트의 **일부 기능(쿼리 빌더, RPC, 트�
 
 - Node/pg 버전별 CI 매트릭스와 통합 테스트
 - 벤치마크 및 성능 가이드
+- Auth/Storage/Realtime 마이그레이션 가이드 (Cognito/GIP, S3/GCS, Realtime 대안)
 - 기여 가이드/이슈 템플릿
+
+## 성능 노트 (서버리스 Supabase vs 클라우드 Postgres)
+
+서버리스 Supabase에서 GCP/AWS의 관리형 Postgres로 이동할 때 일반적으로 기대할 수 있는 차이:
+- 네트워크 hop: Supabase는 edge/API/REST 계층이 추가될 수 있고, 동일 VPC 내 직접 접속은 hop이 줄어듭니다.
+- 콜드스타트/풀링: 서버리스는 cold start나 aggressive pooling이 있을 수 있어, 전용 풀러(pgBouncer/RDS Proxy)가 tail latency를 낮춥니다.
+- 네트워크 경로: 공용망 vs VPC/피어링에 따라 jitter와 p95/p99가 달라집니다.
+- 오버헤드: HTTP/PostgREST 계층 직렬화 비용이 추가되며, 직접 SQL 클라이언트는 이를 줄입니다.
+
+벤치마크 수치: **TBD (출처 필요)**. 공개된 벤치마크 링크가 있으면 PR로 공유해 주세요.
+
+## 벤치마크 방법론 (초안)
+
+- 워크로드: 단순 `select`, 필터+정렬 `select`, `insert`, `rpc`
+- warm/cold 구분, p50/p95/p99 측정
+- 동일 리전/인스턴스 크기, DB 버전/풀 설정 기록
+- 가능하면 네트워크/쿼리 시간 분리 측정
+- 스크립트/원본 결과 공개
 
 ## 설치 방법
 

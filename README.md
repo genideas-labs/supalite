@@ -2,8 +2,30 @@
 [한국어 README](README.ko.md)
 
 [![npm version](https://img.shields.io/npm/v/supalite.svg)](https://www.npmjs.com/package/supalite)
+[![npm downloads](https://img.shields.io/npm/dm/supalite.svg)](https://www.npmjs.com/package/supalite)
+[![license](https://img.shields.io/npm/l/supalite.svg)](LICENSE)
+[![types](https://img.shields.io/npm/types/supalite.svg)](https://www.npmjs.com/package/supalite)
+[![node](https://img.shields.io/node/v/supalite.svg)](https://www.npmjs.com/package/supalite)
+[![ci](https://img.shields.io/badge/CI-planned-lightgrey.svg)](https://github.com/genideas-labs/supalite/actions)
 
-A lightweight and efficient PostgreSQL client library. It mirrors the Supabase API while providing a smaller and faster implementation.
+A lightweight PostgreSQL client focused on the Supabase query builder. It keeps the familiar API but trims the surface area so you get a smaller footprint and less overhead in production.
+
+In one line: **SupaLite is a slim Supabase client for query builder + RPC + transactions.** If you need full Supabase features (auth/storage/realtime), use `supabase-js`.
+
+Used in production by [oqoq.ai](https://oqoq.ai).
+
+Compatibility at a glance:
+- ✅ Select/filters/order/pagination
+- ✅ PostgREST-style embeds (`related_table(*)`, `!inner`)
+- ✅ Insert/update/delete/upsert (including `ignoreDuplicates`)
+- ✅ RPC (including `single`/`maybeSingle`)
+- ❌ Auth/Storage/Realtime
+
+Cloud migration note (GCP/AWS):
+If you are moving off Supabase, SupaLite replaces only the **DB query layer**. You still need alternatives for Auth/Storage/Realtime. Typical choices are:
+- Auth: managed identity (AWS Cognito / Google Identity Platform) or self-hosted (GoTrue/Keycloak)
+- Storage: object storage (S3 / GCS)
+- Realtime: managed pub/sub, WebSocket services, or PostgreSQL LISTEN/NOTIFY + your own gateway
 
 ## Key Features
 
@@ -27,7 +49,26 @@ SupaLite targets a focused subset of the Supabase client: query builder, RPC, an
 
 - CI matrix for Node/pg versions with integration tests
 - Benchmarks and performance guidance
+- Auth/Storage/Realtime migration guidance (Cognito/GIP, S3/GCS, Realtime options)
 - Contribution guide and issue templates
+
+## Performance notes (serverless Supabase vs cloud Postgres)
+
+General differences you can expect when moving off serverless Supabase to a managed Postgres on GCP/AWS:
+- Network hops: Supabase often adds extra hops (edge/API/REST layer) vs direct Postgres access, especially within the same VPC.
+- Cold starts and pooling: serverless tiers can cold-start or aggressively pool; dedicated poolers (pgBouncer/RDS Proxy) reduce tail latency.
+- Network path: public Internet vs private VPC/peering changes jitter and p95/p99 latency.
+- Overhead: HTTP/PostgREST layers add serialization cost; direct SQL clients minimize that overhead.
+
+Benchmarks and numbers: **TBD (source needed)**. If you have public benchmarks, please open a PR with sources.
+
+## Benchmark methodology (draft)
+
+- Workloads: simple `select`, filtered `select + order`, `insert`, `rpc`.
+- Measure p50/p95/p99 with warm and cold runs.
+- Keep region and instance size identical; record DB version and pool settings.
+- Separate client latency vs query time when possible.
+- Publish scripts and raw results.
 
 ## Installation
 

@@ -20,11 +20,17 @@
   },
   "keywords": [
     "supabase",
+    "pg",
+    "postgres",
     "postgresql",
     "typescript",
     "database",
     "lightweight",
-    "query-builder"
+    "query-builder",
+    "rpc",
+    "transaction",
+    "typesafe",
+    "serverless"
   ],
   "author": {
     "name": "Wondong Shin",
