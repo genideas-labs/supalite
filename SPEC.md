@@ -151,7 +151,24 @@ Notes:
 - Some tests require a running PostgreSQL with the right schema and `DB_CONNECTION` env var.
 - Raw SQL tests validate exact SQL generation via the private `buildQuery()`.
 
-## 11. Non-goals
+## 11. Type generation CLI
+- `supalite gen types --db-url <postgres_url> [--schema public,analytics] [--out supalite.types.ts]`
+- Reads schema metadata from `information_schema` and `pg_catalog`.
+- Emits `Json` and a `Database` type with `Tables`, `Views`, `Functions`, `Enums`, and `CompositeTypes`.
+- `BIGINT` maps to `bigint`; `json/jsonb` map to `Json`.
+- `--date-as-date` maps `date`/`timestamp` columns to `Date`.
+- `--include-relationships` emits FK metadata in `Relationships`.
+- `--include-constraints` emits PK/UNIQUE/CHECK/FK metadata per table.
+- `--include-indexes` emits index metadata per table.
+- `--include-composite-types` emits `CompositeTypes` definitions.
+- `--include-function-signatures` maps `Functions.Args/Returns` from schema metadata.
+- `--type-case` controls enum/composite type key casing (`preserve` | `snake` | `camel` | `pascal`).
+- `--function-case` controls function key casing (`preserve` | `snake` | `camel` | `pascal`).
+- `--dump-functions-sql [path]` writes `CREATE FUNCTION/PROCEDURE` definitions from `pg_get_functiondef`.
+- Arrays are mapped to `baseType[]` using the underlying element type.
+- Insert types mark nullable/default/identity/generated columns as optional; Update types are always optional.
+
+## 12. Non-goals
 - Full Supabase feature parity (auth, storage, realtime).
 - SQL injection-safe raw SQL DSL beyond the query builder.
 - Advanced query planner hints or server-side caching.

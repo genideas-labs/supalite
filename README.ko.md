@@ -152,19 +152,41 @@ const data = await db
 - 가능하면 네트워크/쿼리 시간 분리 측정
 - 스크립트/원본 결과 공개
 
+## SupaLite를 선택해야 하는 이유
+
+- PostgREST hop 없이 PostgreSQL에 직접 연결해 더 낮은 레이턴시
+- Supabase 스타일의 SQL 유사 API로 마이그레이션이 쉬움
+- native `bigint` 지원 및 변환 옵션 제공
+- Supabase 클라이언트에서 불가능한 트랜잭션/멀티 스텝 플로우 지원
+- 관계/제약/인덱스/함수 시그니처까지 포함 가능한 타입 생성기
+
+알려진 트레이드오프는 `docs/limitations.ko.md`를 참고하세요.
+
 ## 설치 방법
 
 ```bash
 npm install supalite
 ```
 
+### CLI
+
+```bash
+npm install -g supalite
+```
+
+```bash
+supalite gen types --help
+```
+
+전역 설치 없이 `npx supalite ...`로도 사용 가능합니다.
+
 ## 타입 시스템
 
 ### 데이터베이스 스키마 정의
 
 ```typescript
-// Supabase CLI의 타입 생성기로 생성된 데이터베이스 타입 정의
-// 예: supabase gen types typescript --local > database.types.ts
+// SupaLite CLI의 타입 생성기로 생성된 데이터베이스 타입 정의
+// 예: npx supalite gen types --db-url "postgresql://user:pass@localhost:5432/db" --out database.types.ts
 import { Database } from './types/database';
 
 // 타입이 적용된 클라이언트 생성
@@ -224,6 +246,30 @@ interface Database {
   // 다른 스키마들...
 }
 ```
+
+### supalite gen types로 타입 생성
+
+```bash
+npx supalite gen types --db-url "postgresql://user:pass@localhost:5432/db" --schema public,analytics --out database.types.ts --date-as-date
+```
+
+- `--out -`는 stdout으로 출력합니다.
+- BIGINT 컬럼은 `bigint`로 생성됩니다.
+- `--date-as-date`는 `date`/`timestamp` 컬럼을 `Date`로 생성합니다.
+- `--include-relationships`는 FK 메타데이터를 `Relationships`에 포함합니다.
+- `--include-constraints`는 PK/UNIQUE/CHECK/FK 메타데이터를 포함합니다.
+- `--include-indexes`는 인덱스 메타데이터(이름/유니크/정의)를 포함합니다.
+- `--include-composite-types`는 `CompositeTypes` 정의를 포함합니다.
+- `--include-function-signatures`는 `Functions.Args/Returns`를 스키마 메타데이터로 매핑합니다.
+- `Functions`에는 감지된 함수명이 기본 포함되며, `--include-function-signatures`로 RPC Args/Returns 참고가 가능합니다.
+- `--type-case`는 enum/composite 타입 키의 케이스를 제어합니다 (`preserve` | `snake` | `camel` | `pascal`)
+- `--function-case`는 함수 키의 케이스를 제어합니다 (`preserve` | `snake` | `camel` | `pascal`)
+- `--dump-functions-sql [path]`는 `pg_get_functiondef` 기반의 `CREATE FUNCTION/PROCEDURE` 정의를 로컬 파일로 저장합니다.
+- 테스트/개발용 스키마를 제외하려면 `--schema public`을 사용하세요.
+- `--db-url`을 생략하면 `DB_CONNECTION`을 사용합니다.
+
+로드맵
+- TODO (AI): 스키마 메타데이터 기반 RPC/함수용 트랜잭션 TypeScript 래퍼 자동 생성
 
 ## 사용 예시
 

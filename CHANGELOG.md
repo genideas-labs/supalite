@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0] - 2026-01-17
+
+### ✨ Added
+- `supalite gen types` CLI to generate TypeScript Database types from PostgreSQL schemas.
+- BIGINT columns are emitted as `bigint` in the generated types.
+- `--date-as-date` option to map `date`/`timestamp` columns to `Date` in generated types.
+- `--include-relationships`, `--include-constraints`, `--include-indexes` options to emit schema metadata.
+- `--include-composite-types` and `--include-function-signatures` options for composite types and typed function signatures.
+- `--type-case` and `--function-case` options to control enum/composite and function key casing.
+- `--dump-functions-sql` option to export `CREATE FUNCTION/PROCEDURE` definitions to a local file.
+- Added gen-types seed/cleanup scripts and limitations docs.
+
 ## [0.6.1] - 2026-01-16
 
 ### ✨ Added
