@@ -24,6 +24,13 @@ export class PostgresError extends Error {
       this.constraint = pgError.constraint;
     }
 
+    if (!this.code) {
+      const match = message.match(/\b(PGRST\d{3})\b/);
+      if (match) {
+        this.code = match[1];
+      }
+    }
+
     // Ensure proper prototype chain for ES5
     Object.setPrototypeOf(this, PostgresError.prototype);
   }

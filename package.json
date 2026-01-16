@@ -1,12 +1,13 @@
 {
   "name": "supalite",
-  "version": "0.5.7",
+  "version": "0.6.1",
   "description": "A lightweight TypeScript PostgreSQL client with Supabase-style API",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "test": "jest --passWithNoTests",
+    "test:errors": "node scripts/jest-errors.js",
     "lint": "eslint src/**/*.ts",
     "format": "prettier --write \"src/**/*.ts\"",
     "prepare": "$npm_execpath run build",

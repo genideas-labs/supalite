@@ -10,8 +10,9 @@ class QueryBuilder {
         this.pool = pool;
         this[_a] = 'QueryBuilder';
         this.selectColumns = null;
-        this.joinClauses = [];
+        this.selectSelection = null;
         this.whereConditions = [];
+        this.joinWhereConditions = new Map();
         this.orConditions = [];
         this.orderByColumns = [];
         this.whereValues = [];
@@ -22,6 +23,245 @@ class QueryBuilder {
         this.table = table;
         this.schema = schema;
         this.verbose = verbose;
+    }
+    splitColumn(column) {
+        const parts = column.split('.');
+        if (parts.length > 1) {
+            return { path: parts.slice(0, -1).join('.'), column: parts[parts.length - 1] };
+        }
+        return { column };
+    }
+    splitTopLevel(input) {
+        const result = [];
+        let depth = 0;
+        let start = 0;
+        for (let i = 0; i < input.length; i += 1) {
+            const char = input[i];
+            if (char === '(') {
+                depth += 1;
+            }
+            else if (char === ')' && depth > 0) {
+                depth -= 1;
+            }
+            else if (char === ',' && depth === 0) {
+                result.push(input.slice(start, i));
+                start = i + 1;
+            }
+        }
+        result.push(input.slice(start));
+        return result.map((value) => value.trim()).filter(Boolean);
+    }
+    splitOrConditions(input) {
+        const parts = [];
+        let current = '';
+        let inQuotes = false;
+        let escaped = false;
+        for (let i = 0; i < input.length; i += 1) {
+            const char = input[i];
+            if (escaped) {
+                current += char;
+                escaped = false;
+                continue;
+            }
+            if (char === '\\') {
+                escaped = true;
+                current += char;
+                continue;
+            }
+            if (char === '"') {
+                inQuotes = !inQuotes;
+                current += char;
+                continue;
+            }
+            if (char === ',' && !inQuotes) {
+                if (current.trim()) {
+                    parts.push(current.trim());
+                }
+                current = '';
+                continue;
+            }
+            current += char;
+        }
+        if (current.trim()) {
+            parts.push(current.trim());
+        }
+        return parts;
+    }
+    splitOrCondition(condition) {
+        let inQuotes = false;
+        let escaped = false;
+        let firstDot = -1;
+        let secondDot = -1;
+        for (let i = 0; i < condition.length; i += 1) {
+            const char = condition[i];
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (char === '\\') {
+                escaped = true;
+                continue;
+            }
+            if (char === '"') {
+                inQuotes = !inQuotes;
+                continue;
+            }
+            if (char === '.' && !inQuotes) {
+                if (firstDot === -1) {
+                    firstDot = i;
+                }
+                else {
+                    secondDot = i;
+                    break;
+                }
+            }
+        }
+        if (firstDot === -1 || secondDot === -1) {
+            return null;
+        }
+        const field = condition.slice(0, firstDot).trim();
+        const op = condition.slice(firstDot + 1, secondDot).trim();
+        const value = condition.slice(secondDot + 1).trim();
+        return { field, op, value };
+    }
+    unescapeOrValue(value) {
+        return value.replace(/\\([\\\".,])/g, '$1');
+    }
+    parseSelection(input) {
+        const tokens = this.splitTopLevel(input);
+        const items = [];
+        for (const token of tokens) {
+            const trimmed = token.trim();
+            if (!trimmed) {
+                continue;
+            }
+            const openIndex = trimmed.indexOf('(');
+            if (openIndex === -1 || !trimmed.endsWith(')')) {
+                items.push({ kind: 'column', value: trimmed });
+                continue;
+            }
+            const prefix = trimmed.slice(0, openIndex).trim();
+            const inner = trimmed.slice(openIndex + 1, -1).trim();
+            if (!prefix) {
+                items.push({ kind: 'column', value: trimmed });
+                continue;
+            }
+            const [tableRaw, joinTypeRaw] = prefix.split('!');
+            const foreignTable = (tableRaw || '').trim();
+            if (!foreignTable) {
+                items.push({ kind: 'column', value: trimmed });
+                continue;
+            }
+            const joinType = joinTypeRaw?.trim().toLowerCase() === 'inner' ? 'inner' : undefined;
+            const selection = inner
+                ? this.parseSelection(inner)
+                : { items: [{ kind: 'column', value: '*' }] };
+            const join = {
+                foreignTable,
+                joinType,
+                selection,
+            };
+            items.push({ kind: 'join', join });
+        }
+        return { items };
+    }
+    quoteIdentifier(identifier) {
+        if (identifier === '*')
+            return '*';
+        if (identifier.startsWith('"') && identifier.endsWith('"'))
+            return identifier;
+        return `"${identifier}"`;
+    }
+    quoteColumn(column) {
+        if (column === '*')
+            return '*';
+        if (column.endsWith('.*')) {
+            const table = column.slice(0, -2);
+            return `${this.quoteIdentifier(table)}.*`;
+        }
+        return column
+            .split('.')
+            .map((part) => this.quoteIdentifier(part))
+            .join('.');
+    }
+    getJoinConditions(path) {
+        if (!this.joinWhereConditions.has(path)) {
+            this.joinWhereConditions.set(path, []);
+        }
+        return this.joinWhereConditions.get(path);
+    }
+    collectJoinPaths(selection, prefix, target) {
+        for (const item of selection.items) {
+            if (item.kind !== 'join') {
+                continue;
+            }
+            const joinPath = prefix ? `${prefix}.${item.join.foreignTable}` : item.join.foreignTable;
+            target.add(joinPath);
+            this.collectJoinPaths(item.join.selection, joinPath, target);
+        }
+    }
+    async buildSelectList(schema, table, selection, pathPrefix = '') {
+        const schemaTable = `"${schema}"."${table}"`;
+        const joinExistenceConditions = [];
+        const parts = [];
+        let hasJoin = false;
+        let hasColumn = false;
+        for (const item of selection.items) {
+            if (item.kind === 'column') {
+                hasColumn = true;
+                parts.push(this.quoteColumn(item.value));
+                continue;
+            }
+            hasJoin = true;
+            const join = item.join;
+            const joinPath = pathPrefix ? `${pathPrefix}.${join.foreignTable}` : join.foreignTable;
+            const fk = await this.client.getForeignKey(schema, table, join.foreignTable);
+            if (!fk) {
+                console.warn(`[SupaLite WARNING] No foreign key found from ${join.foreignTable} to ${table}`);
+                continue;
+            }
+            const foreignSchemaTable = `"${schema}"."${join.foreignTable}"`;
+            const nested = await this.buildSelectList(schema, join.foreignTable, join.selection, joinPath);
+            const joinFilters = this.joinWhereConditions.get(joinPath) || [];
+            const joinWhereParts = [`"${fk.foreignColumn}" = ${schemaTable}."${fk.column}"`, ...joinFilters, ...nested.joinExistenceConditions];
+            const joinWhereSql = joinWhereParts.length > 0 ? ` WHERE ${joinWhereParts.join(' AND ')}` : '';
+            if (join.joinType === 'inner') {
+                joinExistenceConditions.push(`EXISTS (SELECT 1 FROM ${foreignSchemaTable} WHERE ${joinWhereParts.join(' AND ')})`);
+            }
+            if (fk.isArray) {
+                parts.push(`(
+          SELECT COALESCE(json_agg(j), '[]'::json)
+          FROM (
+            SELECT ${nested.selectClause}
+            FROM ${foreignSchemaTable}${joinWhereSql}
+          ) as j
+        ) as "${join.foreignTable}"`);
+            }
+            else {
+                parts.push(`(
+          SELECT row_to_json(j)
+          FROM (
+            SELECT ${nested.selectClause}
+            FROM ${foreignSchemaTable}${joinWhereSql}
+            LIMIT 1
+          ) as j
+        ) as "${join.foreignTable}"`);
+            }
+        }
+        if (!hasColumn && hasJoin) {
+            parts.unshift(`${schemaTable}.*`);
+        }
+        if (hasJoin) {
+            for (let i = 0; i < parts.length; i += 1) {
+                if (parts[i] === '*') {
+                    parts[i] = `${schemaTable}.*`;
+                }
+            }
+        }
+        if (parts.length === 0) {
+            parts.push('*');
+        }
+        return { selectClause: parts.join(', '), joinExistenceConditions };
     }
     then(onfulfilled, onrejected) {
         return this.execute().then(onfulfilled, onrejected);
@@ -37,69 +277,65 @@ class QueryBuilder {
         this.headOption = options?.head;
         if (!columns || columns === '*') {
             this.selectColumns = '*';
+            this.selectSelection = { items: [{ kind: 'column', value: '*' }] };
             return this;
         }
-        const joinRegex = /(\w+)\(([^)]+)\)/g;
-        let match;
-        const regularColumns = [];
-        let lastIndex = 0;
-        while ((match = joinRegex.exec(columns)) !== null) {
-            const foreignTable = match[1];
-            const innerColumns = match[2];
-            this.joinClauses.push({ foreignTable, columns: innerColumns });
-            // Add the part of the string before this match to regular columns, if any
-            const preceding = columns.substring(lastIndex, match.index).trim();
-            if (preceding) {
-                regularColumns.push(...preceding.split(',').filter(c => c.trim()));
-            }
-            lastIndex = joinRegex.lastIndex;
-        }
-        // Add the rest of the string after the last match
-        const remaining = columns.substring(lastIndex).trim();
-        if (remaining) {
-            regularColumns.push(...remaining.split(',').filter(c => c.trim()));
-        }
-        const processedColumns = regularColumns
-            .map(col => col.trim())
-            .filter(col => col)
-            .map(col => {
-            if (col === '*')
-                return '*';
-            return col.startsWith('"') && col.endsWith('"') ? col : `"${col}"`;
-        });
-        this.selectColumns = processedColumns.length > 0 ? processedColumns.join(', ') : null;
+        const selection = this.parseSelection(columns);
+        this.selectSelection = selection;
+        const processedColumns = selection.items
+            .filter((item) => item.kind === 'column')
+            .map((item) => item.value)
+            .map((col) => col.trim())
+            .filter(Boolean)
+            .map((col) => (col === '*' ? '*' : this.quoteColumn(col)));
+        this.selectColumns = processedColumns.length > 0 ? processedColumns.join(', ') : '*';
         return this;
     }
     match(conditions) {
         for (const key in conditions) {
-            this.whereConditions.push(`"${key}" = $${this.whereValues.length + 1}`);
+            const { path, column } = this.splitColumn(key);
+            const target = path ? this.getJoinConditions(path) : this.whereConditions;
+            const quoted = path ? this.quoteIdentifier(column) : this.quoteColumn(key);
+            target.push(`${quoted} = $${this.whereValues.length + 1}`);
             this.whereValues.push(conditions[key]);
         }
         return this;
     }
     eq(column, value) {
-        this.whereConditions.push(`"${column}" = $${this.whereValues.length + 1}`);
+        const { path, column: col } = this.splitColumn(column);
+        const target = path ? this.getJoinConditions(path) : this.whereConditions;
+        const quoted = path ? this.quoteIdentifier(col) : this.quoteColumn(column);
+        target.push(`${quoted} = $${this.whereValues.length + 1}`);
         this.whereValues.push(value);
         return this;
     }
     neq(column, value) {
-        this.whereConditions.push(`"${column}" != $${this.whereValues.length + 1}`);
+        const { path, column: col } = this.splitColumn(column);
+        const target = path ? this.getJoinConditions(path) : this.whereConditions;
+        const quoted = path ? this.quoteIdentifier(col) : this.quoteColumn(column);
+        target.push(`${quoted} != $${this.whereValues.length + 1}`);
         this.whereValues.push(value);
         return this;
     }
     is(column, value) {
+        const { path, column: col } = this.splitColumn(column);
+        const target = path ? this.getJoinConditions(path) : this.whereConditions;
+        const quoted = path ? this.quoteIdentifier(col) : this.quoteColumn(column);
         if (value === null) {
-            this.whereConditions.push(`"${column}" IS NULL`);
+            target.push(`${quoted} IS NULL`);
         }
         else {
-            this.whereConditions.push(`"${column}" IS $${this.whereValues.length + 1}`);
+            target.push(`${quoted} IS $${this.whereValues.length + 1}`);
             this.whereValues.push(value);
         }
         return this;
     }
     not(column, operator, value) {
         if (operator === 'is' && value === null) {
-            this.whereConditions.push(`"${column}" IS NOT NULL`);
+            const { path, column: col } = this.splitColumn(column);
+            const target = path ? this.getJoinConditions(path) : this.whereConditions;
+            const quoted = path ? this.quoteIdentifier(col) : this.quoteColumn(column);
+            target.push(`${quoted} IS NOT NULL`);
         }
         else {
             // 추후 다른 not 연산자들을 위해 남겨둠
@@ -108,43 +344,82 @@ class QueryBuilder {
         return this;
     }
     contains(column, value) {
-        this.whereConditions.push(`"${column}" @> $${this.whereValues.length + 1}`);
+        const { path, column: col } = this.splitColumn(column);
+        const target = path ? this.getJoinConditions(path) : this.whereConditions;
+        const quoted = path ? this.quoteIdentifier(col) : this.quoteColumn(column);
+        target.push(`${quoted} @> $${this.whereValues.length + 1}`);
         this.whereValues.push(value);
         return this;
     }
     in(column, values) {
+        const { path, column: col } = this.splitColumn(column);
+        const target = path ? this.getJoinConditions(path) : this.whereConditions;
+        const quoted = path ? this.quoteIdentifier(col) : this.quoteColumn(column);
         if (values.length === 0) {
-            this.whereConditions.push('FALSE');
+            target.push('FALSE');
             return this;
         }
-        const placeholders = values.map((_, i) => `$${this.whereValues.length + i + 1}`).join(',');
-        this.whereConditions.push(`"${column}" IN (${placeholders})`);
-        this.whereValues.push(...values);
+        const nonNullValues = values.filter((value) => value != null);
+        const hasNull = nonNullValues.length !== values.length;
+        if (nonNullValues.length === 0) {
+            target.push(`${quoted} IS NULL`);
+            return this;
+        }
+        const placeholders = nonNullValues
+            .map((_, i) => `$${this.whereValues.length + i + 1}`)
+            .join(',');
+        const inClause = `${quoted} IN (${placeholders})`;
+        target.push(hasNull ? `(${inClause} OR ${quoted} IS NULL)` : inClause);
+        this.whereValues.push(...nonNullValues);
         return this;
     }
     gt(column, value) {
-        this.whereConditions.push(`"${column}" > $${this.whereValues.length + 1}`);
+        const { path, column: col } = this.splitColumn(column);
+        const target = path ? this.getJoinConditions(path) : this.whereConditions;
+        const quoted = path ? this.quoteIdentifier(col) : this.quoteColumn(column);
+        target.push(`${quoted} > $${this.whereValues.length + 1}`);
         this.whereValues.push(value);
         return this;
     }
     gte(column, value) {
-        this.whereConditions.push(`"${column}" >= $${this.whereValues.length + 1}`);
+        const { path, column: col } = this.splitColumn(column);
+        const target = path ? this.getJoinConditions(path) : this.whereConditions;
+        const quoted = path ? this.quoteIdentifier(col) : this.quoteColumn(column);
+        target.push(`${quoted} >= $${this.whereValues.length + 1}`);
         this.whereValues.push(value);
         return this;
     }
     lt(column, value) {
-        this.whereConditions.push(`"${column}" < $${this.whereValues.length + 1}`);
+        const { path, column: col } = this.splitColumn(column);
+        const target = path ? this.getJoinConditions(path) : this.whereConditions;
+        const quoted = path ? this.quoteIdentifier(col) : this.quoteColumn(column);
+        target.push(`${quoted} < $${this.whereValues.length + 1}`);
         this.whereValues.push(value);
         return this;
     }
     lte(column, value) {
-        this.whereConditions.push(`"${column}" <= $${this.whereValues.length + 1}`);
+        const { path, column: col } = this.splitColumn(column);
+        const target = path ? this.getJoinConditions(path) : this.whereConditions;
+        const quoted = path ? this.quoteIdentifier(col) : this.quoteColumn(column);
+        target.push(`${quoted} <= $${this.whereValues.length + 1}`);
         this.whereValues.push(value);
+        return this;
+    }
+    like(column, pattern) {
+        const { path, column: col } = this.splitColumn(column);
+        const target = path ? this.getJoinConditions(path) : this.whereConditions;
+        const quoted = path ? this.quoteIdentifier(col) : this.quoteColumn(column);
+        target.push(`${quoted} LIKE $${this.whereValues.length + 1}`);
+        this.whereValues.push(pattern);
         return this;
     }
     order(column, options) {
         const ascending = options?.ascending !== false; // undefined나 true면 오름차순, false만 내림차순
-        this.orderByColumns.push(`"${column}" ${ascending ? 'ASC' : 'DESC'}`);
+        let clause = `${this.quoteColumn(column)} ${ascending ? 'ASC' : 'DESC'}`;
+        if (options && Object.prototype.hasOwnProperty.call(options, 'nullsFirst')) {
+            clause += options.nullsFirst ? ' NULLS FIRST' : ' NULLS LAST';
+        }
+        this.orderByColumns.push(clause);
         return this;
     }
     limit(value) {
@@ -164,53 +439,81 @@ class QueryBuilder {
         return this.execute();
     }
     ilike(column, pattern) {
-        this.whereConditions.push(`"${column}" ILIKE $${this.whereValues.length + 1}`);
+        const { path, column: col } = this.splitColumn(column);
+        const target = path ? this.getJoinConditions(path) : this.whereConditions;
+        const quoted = path ? this.quoteIdentifier(col) : this.quoteColumn(column);
+        target.push(`${quoted} ILIKE $${this.whereValues.length + 1}`);
         this.whereValues.push(pattern);
         return this;
     }
     or(conditions) {
-        const orParts = conditions.split(',').map(condition => {
-            const [field, op, value] = condition.split('.');
+        const orParts = this.splitOrConditions(conditions).map(condition => {
+            const parsed = this.splitOrCondition(condition);
+            if (!parsed) {
+                return '';
+            }
+            const { field, op, value } = parsed;
+            if (!field || !op) {
+                return '';
+            }
+            if (field.includes('.')) {
+                throw new Error('or() does not support related table filters.');
+            }
             const validOperators = ['eq', 'neq', 'ilike', 'like', 'gt', 'gte', 'lt', 'lte', 'is'];
             if (!validOperators.includes(op)) {
                 throw new Error(`Invalid operator: ${op}`);
             }
-            let processedValue = value;
-            if (value === 'null') {
-                processedValue = null;
+            let normalizedValue = value;
+            if (normalizedValue.startsWith('"') && normalizedValue.endsWith('"')) {
+                normalizedValue = normalizedValue.slice(1, -1);
             }
-            else if (!isNaN(Number(value))) {
-                processedValue = value;
-            }
-            else if (value.match(/^\d{4}-\d{2}-\d{2}/)) {
-                processedValue = value;
-            }
-            this.whereValues.push(processedValue);
-            const paramIndex = this.whereValues.length;
+            normalizedValue = this.unescapeOrValue(normalizedValue);
+            const isNullValue = normalizedValue === 'null';
+            const isNowValue = typeof normalizedValue === 'string' && normalizedValue.toLowerCase() === 'now()';
+            const quotedField = this.quoteColumn(field);
+            const buildPlaceholderClause = (sqlOp) => {
+                let processedValue = normalizedValue;
+                if (isNullValue) {
+                    processedValue = null;
+                }
+                else if (typeof normalizedValue === 'string' && !isNaN(Number(normalizedValue))) {
+                    processedValue = normalizedValue;
+                }
+                else if (typeof normalizedValue === 'string' && normalizedValue.match(/^\d{4}-\d{2}-\d{2}/)) {
+                    processedValue = normalizedValue;
+                }
+                this.whereValues.push(processedValue);
+                const paramIndex = this.whereValues.length;
+                return `${quotedField} ${sqlOp} $${paramIndex}`;
+            };
+            const buildClause = (sqlOp) => {
+                if (isNowValue) {
+                    return `${quotedField} ${sqlOp} NOW()`;
+                }
+                return buildPlaceholderClause(sqlOp);
+            };
             switch (op) {
                 case 'eq':
-                    return `"${field}" = $${paramIndex}`;
+                    return buildClause('=');
                 case 'neq':
-                    return `"${field}" != $${paramIndex}`;
+                    return buildClause('!=');
                 case 'ilike':
-                    return `"${field}" ILIKE $${paramIndex}`;
+                    return buildClause('ILIKE');
                 case 'like':
-                    return `"${field}" LIKE $${paramIndex}`;
+                    return buildClause('LIKE');
                 case 'gt':
-                    return `"${field}" > $${paramIndex}`;
+                    return buildClause('>');
                 case 'gte':
-                    return `"${field}" >= $${paramIndex}`;
+                    return buildClause('>=');
                 case 'lt':
-                    return `"${field}" < $${paramIndex}`;
+                    return buildClause('<');
                 case 'lte':
-                    return `"${field}" <= $${paramIndex}`;
+                    return buildClause('<=');
                 case 'is':
-                    if (processedValue === null) {
-                        // Remove the null value from whereValues since we don't need a parameter for IS NULL
-                        this.whereValues.pop();
-                        return `"${field}" IS NULL`;
+                    if (isNullValue) {
+                        return `${quotedField} IS NULL`;
                     }
-                    return `"${field}" IS $${paramIndex}`;
+                    return buildPlaceholderClause('IS');
                 default:
                     return '';
             }
@@ -232,6 +535,7 @@ class QueryBuilder {
         this.queryType = 'UPSERT';
         this.insertData = values;
         this.conflictTarget = options?.onConflict;
+        this.ignoreDuplicates = options?.ignoreDuplicates;
         return this;
     }
     formatConflictTarget(target) {
@@ -270,11 +574,12 @@ class QueryBuilder {
     shouldReturnData() {
         return this.selectColumns !== null;
     }
-    buildWhereClause(updateValues) {
-        if (this.whereConditions.length === 0) {
+    buildWhereClause(updateValues, conditionsOverride) {
+        const baseConditions = conditionsOverride ? [...conditionsOverride] : [...this.whereConditions];
+        if (baseConditions.length === 0 && this.orConditions.length === 0) {
             return '';
         }
-        const conditions = [...this.whereConditions];
+        const conditions = [...baseConditions];
         if (this.orConditions.length > 0) {
             conditions.push(this.orConditions.map(group => `(${group.join(' OR ')})`).join(' AND '));
         }
@@ -288,57 +593,33 @@ class QueryBuilder {
     async buildQuery() {
         let query = '';
         let values = [];
+        let baseQuery;
+        let baseValues;
         let insertColumns = [];
         const returning = this.shouldReturnData() ? ` RETURNING ${this.selectColumns || '*'}` : '';
         const schemaTable = `"${String(this.schema)}"."${String(this.table)}"`;
         switch (this.queryType) {
             case 'SELECT': {
-                if (this.headOption) {
+                const needsEstimate = this.countOption === 'planned' || this.countOption === 'estimated';
+                if (this.headOption && !needsEstimate) {
                     query = `SELECT COUNT(*) FROM ${schemaTable}`;
                     query += this.buildWhereClause();
                     values = [...this.whereValues];
                     break;
                 }
-                let selectClause = this.selectColumns;
-                if (!selectClause) {
-                    selectClause = this.joinClauses.length > 0 ? `${schemaTable}.*` : '*';
-                }
-                else if (selectClause.includes('*') && this.joinClauses.length > 0) {
-                    selectClause = selectClause.replace('*', `${schemaTable}.*`);
-                }
-                const joinSubqueries = await Promise.all(this.joinClauses.map(async (join) => {
-                    const fk = await this.client.getForeignKey(String(this.schema), String(this.table), join.foreignTable);
-                    if (!fk) {
-                        console.warn(`[SupaLite WARNING] No foreign key found from ${join.foreignTable} to ${String(this.table)}`);
-                        return null;
+                const selection = this.selectSelection || { items: [{ kind: 'column', value: '*' }] };
+                const joinPaths = new Set();
+                this.collectJoinPaths(selection, '', joinPaths);
+                for (const path of this.joinWhereConditions.keys()) {
+                    if (!joinPaths.has(path)) {
+                        throw new Error(`Filter on related table "${path}" requires select() to include ${path}().`);
                     }
-                    const foreignSchemaTable = `"${String(this.schema)}"."${join.foreignTable}"`;
-                    if (fk.isArray) {
-                        return `(
-                SELECT COALESCE(json_agg(j), '[]'::json)
-                FROM (
-                  SELECT ${join.columns}
-                  FROM ${foreignSchemaTable}
-                  WHERE "${fk.foreignColumn}" = ${schemaTable}."${fk.column}"
-                ) as j
-              ) as "${join.foreignTable}"`;
-                    }
-                    return `(
-              SELECT row_to_json(j)
-              FROM (
-                SELECT ${join.columns}
-                FROM ${foreignSchemaTable}
-                WHERE "${fk.foreignColumn}" = ${schemaTable}."${fk.column}"
-                LIMIT 1
-              ) as j
-            ) as "${join.foreignTable}"`;
-                }));
-                const validSubqueries = joinSubqueries.filter(Boolean).join(', ');
-                if (validSubqueries) {
-                    selectClause += `, ${validSubqueries}`;
                 }
-                let baseQuery = `SELECT ${selectClause} FROM ${schemaTable}`;
-                baseQuery += this.buildWhereClause();
+                const { selectClause, joinExistenceConditions } = await this.buildSelectList(String(this.schema), String(this.table), selection);
+                baseQuery = `SELECT ${selectClause} FROM ${schemaTable}`;
+                const baseConditions = [...this.whereConditions, ...joinExistenceConditions];
+                baseQuery += this.buildWhereClause(undefined, baseConditions);
+                baseValues = [...this.whereValues];
                 values = [...this.whereValues];
                 if (this.countOption === 'exact') {
                     query = `SELECT *, COUNT(*) OVER() as exact_count FROM (${baseQuery}) subquery`;
@@ -399,10 +680,24 @@ class QueryBuilder {
                     const insertPlaceholders = values.map((_, i) => `$${i + 1}`).join(',');
                     query = `INSERT INTO ${schemaTable} ("${insertColumns.join('","')}") VALUES (${insertPlaceholders})`;
                 }
-                if (this.queryType === 'UPSERT' && this.conflictTarget) {
-                    const conflictTargetSQL = this.formatConflictTarget(this.conflictTarget);
-                    if (conflictTargetSQL) {
-                        query += ` ON CONFLICT (${conflictTargetSQL}) DO UPDATE SET `;
+                if ((this.queryType === 'UPSERT' || this.queryType === 'INSERT') && (this.conflictTarget || this.ignoreDuplicates)) {
+                    const conflictTargetSQL = this.conflictTarget
+                        ? this.formatConflictTarget(this.conflictTarget)
+                        : '';
+                    const hasTarget = Boolean(conflictTargetSQL);
+                    const isUpsert = this.queryType === 'UPSERT';
+                    if (!isUpsert && this.conflictTarget && !this.ignoreDuplicates) {
+                        throw new Error('insert() only supports onConflict with ignoreDuplicates: true; use upsert() for updates.');
+                    }
+                    query += ' ON CONFLICT';
+                    if (hasTarget) {
+                        query += ` (${conflictTargetSQL})`;
+                    }
+                    if (this.ignoreDuplicates || !isUpsert) {
+                        query += ' DO NOTHING';
+                    }
+                    else if (hasTarget) {
+                        query += ' DO UPDATE SET ';
                         query += insertColumns
                             .map((col) => `"${col}" = EXCLUDED."${col}"`)
                             .join(', ');
@@ -465,16 +760,69 @@ class QueryBuilder {
                 query += ` OFFSET ${this.offsetValue}`;
             }
         }
-        return { query, values };
+        return { query, values, baseQuery, baseValues };
+    }
+    parseExplainPlanRows(planValue) {
+        if (planValue == null) {
+            return null;
+        }
+        let parsedPlan = planValue;
+        if (typeof parsedPlan === 'string') {
+            try {
+                parsedPlan = JSON.parse(parsedPlan);
+            }
+            catch {
+                return null;
+            }
+        }
+        if (Array.isArray(parsedPlan)) {
+            parsedPlan = parsedPlan[0];
+        }
+        if (!parsedPlan || typeof parsedPlan !== 'object') {
+            return null;
+        }
+        const plan = parsedPlan.Plan ?? parsedPlan;
+        const rows = plan['Plan Rows']
+            ?? plan.plan_rows
+            ?? plan.planRows;
+        if (rows == null) {
+            return null;
+        }
+        const count = Number(rows);
+        return Number.isFinite(count) ? count : null;
+    }
+    async estimateCount(executor, baseQuery, baseValues) {
+        if (!baseQuery) {
+            return null;
+        }
+        try {
+            const explainResult = await executor.query(`EXPLAIN (FORMAT JSON) ${baseQuery}`, baseValues ?? []);
+            const row = explainResult.rows[0];
+            if (!row) {
+                return null;
+            }
+            const planValue = Object.values(row)[0];
+            return this.parseExplainPlanRows(planValue);
+        }
+        catch (error) {
+            if (this.verbose) {
+                console.warn('[SupaLite VERBOSE] Failed to estimate count:', error);
+            }
+            return null;
+        }
     }
     async execute() {
         try {
-            const { query, values } = await this.buildQuery(); // await buildQuery
+            const { query, values, baseQuery, baseValues } = await this.buildQuery(); // await buildQuery
             if (this.verbose) {
                 console.log('[SupaLite VERBOSE] SQL:', query);
                 console.log('[SupaLite VERBOSE] Values:', values);
             }
-            const result = await this.pool.query(query, values);
+            const executor = this.client.getQueryClient();
+            const needsEstimate = this.countOption === 'planned' || this.countOption === 'estimated';
+            const result = (this.headOption && needsEstimate)
+                ? { rows: [], rowCount: 0 }
+                : await executor.query(query, values);
             if (this.queryType === 'DELETE' && !this.shouldReturnData()) {
                 return {
                     data: [],
@@ -504,8 +852,16 @@ class QueryBuilder {
             }
             let countResult = null;
             let dataResult = result.rows;
+            const estimatedCount = needsEstimate
+                ? await this.estimateCount(executor, baseQuery, baseValues)
+                : null;
             if (this.headOption) {
-                countResult = Number(result.rows[0].count);
+                if (needsEstimate) {
+                    countResult = estimatedCount ?? 0;
+                }
+                else {
+                    countResult = Number(result.rows[0].count);
+                }
                 dataResult = [];
             }
             else if (this.countOption === 'exact') {
@@ -521,6 +877,9 @@ class QueryBuilder {
                 else {
                     countResult = 0;
                 }
+            }
+            else if (needsEstimate) {
+                countResult = estimatedCount ?? result.rowCount;
             }
             else {
                 countResult = result.rowCount;
@@ -582,9 +941,11 @@ class QueryBuilder {
             };
         }
     }
-    insert(data) {
+    insert(data, options) {
         this.queryType = 'INSERT';
         this.insertData = data;
+        this.conflictTarget = options?.onConflict;
+        this.ignoreDuplicates = options?.ignoreDuplicates;
         return this;
     }
     update(data) {

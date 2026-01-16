@@ -147,6 +147,7 @@ describe('QueryBuilder single() and maybeSingle() methods', () => {
             expect(error).not.toBeNull();
             expect(error?.message).toContain('PGRST116'); // Or "No rows found"
             expect(error?.message).toContain('No rows found');
+            expect(error?.code).toBe('PGRST116');
             expect(status).toBe(404);
             expect(statusText).toContain('Not Found');
         });
@@ -160,6 +161,7 @@ describe('QueryBuilder single() and maybeSingle() methods', () => {
             expect(error).not.toBeNull();
             expect(error?.message).toContain('PGRST114'); // Or "Multiple rows returned"
             expect(error?.message).toContain('Multiple rows returned');
+            expect(error?.code).toBe('PGRST114');
             expect(status).toBe(406);
             expect(statusText).toContain('Not Acceptable');
         });
@@ -199,6 +201,7 @@ describe('QueryBuilder single() and maybeSingle() methods', () => {
             expect(error).not.toBeNull();
             expect(error?.message).toContain('PGRST114');
             expect(error?.message).toContain('Multiple rows returned');
+            expect(error?.code).toBe('PGRST114');
             expect(status).toBe(406);
             expect(statusText).toContain('Not Acceptable');
         });

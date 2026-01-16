@@ -64,6 +64,7 @@ export interface QueryOptions {
     order?: {
         column: string;
         ascending?: boolean;
+        nullsFirst?: boolean;
     };
 }
 export interface FilterOptions {

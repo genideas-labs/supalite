@@ -34,6 +34,35 @@ class RpcBuilder {
     finally(onfinally) {
         return this.execute().finally(onfinally);
     }
+    async isScalarReturn() {
+        const cacheKey = `${this.schema}.${this.procedureName}`;
+        const cached = RpcBuilder.returnTypeCache.get(cacheKey);
+        if (cached !== undefined) {
+            return cached;
+        }
+        try {
+            const metaQuery = `
+        SELECT p.proretset, t.typtype, t.typname
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        JOIN pg_type t ON t.oid = p.prorettype
+        WHERE n.nspname = $1 AND p.proname = $2
+        LIMIT 1
+      `;
+            const metaResult = await this.pool.query(metaQuery, [this.schema, this.procedureName]);
+            if (metaResult.rows.length === 0) {
+                RpcBuilder.returnTypeCache.set(cacheKey, false);
+                return false;
+            }
+            const { proretset, typtype, typname } = metaResult.rows[0];
+            const isScalar = !proretset && typtype !== 'c' && typname !== 'record';
+            RpcBuilder.returnTypeCache.set(cacheKey, isScalar);
+            return isScalar;
+        }
+        catch {
+            return false;
+        }
+    }
     async execute() {
         try {
             const paramNames = Object.keys(this.params);
@@ -57,6 +86,7 @@ class RpcBuilder {
             // if (result.rows.length === 1 && Object.keys(result.rows[0]).length === 1) { ... return single value ... }
             // This implies unwrapping happens by default if it looks like a scalar.
             const isScalarCandidate = result.rows.length === 1 && Object.keys(result.rows[0]).length === 1;
+            const isScalarReturn = isScalarCandidate ? await this.isScalarReturn() : false;
             if (this.singleMode) {
                 if (result.rows.length > 1) {
                     return {
@@ -88,7 +118,7 @@ class RpcBuilder {
                 }
                 // 1 row found
                 // Check for scalar unwrapping
-                if (Object.keys(result.rows[0]).length === 1) {
+                if (isScalarCandidate && isScalarReturn) {
                     data = Object.values(result.rows[0])[0];
                 }
                 else {
@@ -103,7 +133,7 @@ class RpcBuilder {
                 };
             }
             // Default behavior (no .single() called)
-            if (isScalarCandidate) {
+            if (isScalarCandidate && isScalarReturn) {
                 data = Object.values(result.rows[0])[0];
                 return {
                     data,
@@ -114,7 +144,7 @@ class RpcBuilder {
                 };
             }
             return {
-                data: result.rows.length > 0 ? result.rows : null,
+                data: result.rows,
                 error: null,
                 count: result.rowCount,
                 status: 200,
@@ -134,6 +164,7 @@ class RpcBuilder {
 }
 exports.RpcBuilder = RpcBuilder;
 _a = Symbol.toStringTag;
+RpcBuilder.returnTypeCache = new Map();
 class SupaLitePG {
     constructor(config) {
         this.client = null;
@@ -251,6 +282,12 @@ class SupaLitePG {
             await this.rollback();
             throw error;
         }
+    }
+    getQueryClient() {
+        if (this.isTransaction && this.client) {
+            return this.client;
+        }
+        return this.pool;
     }
     from(table, schema) {
         // QueryBuilder constructor will be updated to accept these arguments

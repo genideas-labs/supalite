@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import { QueryBuilder } from './query-builder';
 import { PostgresError } from './errors';
 import { TableOrViewName, SupaliteConfig, Row, QueryResult, SingleQueryResult } from './types';
@@ -27,12 +27,14 @@ export declare class RpcBuilder implements Promise<any> {
     private params;
     readonly [Symbol.toStringTag] = "RpcBuilder";
     private singleMode;
+    private static returnTypeCache;
     constructor(pool: Pool, schema: string, procedureName: string, params?: Record<string, any>);
     single(): this;
     maybeSingle(): this;
     then<TResult1 = any, TResult2 = never>(onfulfilled?: ((value: any) => TResult1 | PromiseLike<TResult1>) | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null): Promise<TResult1 | TResult2>;
     catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null): Promise<any | TResult>;
     finally(onfinally?: (() => void) | null): Promise<any>;
+    private isScalarReturn;
     execute(): Promise<{
         data: any;
         error: PostgresError | null;
@@ -57,6 +59,7 @@ export declare class SupaLitePG<T extends {
     commit(): Promise<void>;
     rollback(): Promise<void>;
     transaction<R>(callback: (client: SupaLitePG<T>) => Promise<R>): Promise<R>;
+    getQueryClient(): Pool | PoolClient;
     from<K extends TableOrViewName<T, 'public'>>(table: K): QueryBuilder<T, 'public', K> & Promise<QueryResult<Row<T, 'public', K>>> & {
         single(): Promise<SingleQueryResult<Row<T, 'public', K>>>;
     };

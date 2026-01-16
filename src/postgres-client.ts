@@ -1,4 +1,4 @@
-import { Pool, types, PoolConfig } from 'pg'; // PoolConfig 추가
+import { Pool, PoolClient, types, PoolConfig } from 'pg'; // PoolConfig 추가
 import { QueryBuilder } from './query-builder';
 import { PostgresError } from './errors';
 import { TableOrViewName, SupaliteConfig, Row, QueryResult, SingleQueryResult, BigintTransformType } from './types'; // BigintTransformType 추가
@@ -31,6 +31,7 @@ type SchemaWithTables = {
 export class RpcBuilder implements Promise<any> {
   readonly [Symbol.toStringTag] = 'RpcBuilder';
   private singleMode: 'strict' | 'maybe' | null = null;
+  private static returnTypeCache: Map<string, boolean> = new Map();
 
   constructor(
     private pool: Pool,
@@ -64,6 +65,37 @@ export class RpcBuilder implements Promise<any> {
 
   finally(onfinally?: (() => void) | null): Promise<any> {
     return this.execute().finally(onfinally);
+  }
+
+  private async isScalarReturn(): Promise<boolean> {
+    const cacheKey = `${this.schema}.${this.procedureName}`;
+    const cached = RpcBuilder.returnTypeCache.get(cacheKey);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    try {
+      const metaQuery = `
+        SELECT p.proretset, t.typtype, t.typname
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        JOIN pg_type t ON t.oid = p.prorettype
+        WHERE n.nspname = $1 AND p.proname = $2
+        LIMIT 1
+      `;
+      const metaResult = await this.pool.query(metaQuery, [this.schema, this.procedureName]);
+      if (metaResult.rows.length === 0) {
+        RpcBuilder.returnTypeCache.set(cacheKey, false);
+        return false;
+      }
+
+      const { proretset, typtype, typname } = metaResult.rows[0];
+      const isScalar = !proretset && typtype !== 'c' && typname !== 'record';
+      RpcBuilder.returnTypeCache.set(cacheKey, isScalar);
+      return isScalar;
+    } catch {
+      return false;
+    }
   }
 
   async execute(): Promise<{
@@ -102,6 +134,7 @@ export class RpcBuilder implements Promise<any> {
       // This implies unwrapping happens by default if it looks like a scalar.
       
       const isScalarCandidate = result.rows.length === 1 && Object.keys(result.rows[0]).length === 1;
+      const isScalarReturn = isScalarCandidate ? await this.isScalarReturn() : false;
 
       if (this.singleMode) {
         if (result.rows.length > 1) {
@@ -136,7 +169,7 @@ export class RpcBuilder implements Promise<any> {
 
         // 1 row found
         // Check for scalar unwrapping
-        if (Object.keys(result.rows[0]).length === 1) {
+        if (isScalarCandidate && isScalarReturn) {
            data = Object.values(result.rows[0])[0];
         } else {
            data = result.rows[0];
@@ -152,7 +185,7 @@ export class RpcBuilder implements Promise<any> {
       }
 
       // Default behavior (no .single() called)
-      if (isScalarCandidate) {
+      if (isScalarCandidate && isScalarReturn) {
          data = Object.values(result.rows[0])[0];
          return {
           data,
@@ -164,7 +197,7 @@ export class RpcBuilder implements Promise<any> {
       }
 
       return {
-        data: result.rows.length > 0 ? result.rows : null,
+        data: result.rows,
         error: null,
         count: result.rowCount,
         status: 200,
@@ -318,6 +351,13 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
       await this.rollback();
       throw error;
     }
+  }
+
+  public getQueryClient(): Pool | PoolClient {
+    if (this.isTransaction && this.client) {
+      return this.client as PoolClient;
+    }
+    return this.pool;
   }
 
   from<K extends TableOrViewName<T, 'public'>>(

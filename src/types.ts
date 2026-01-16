@@ -109,6 +109,7 @@ export interface QueryOptions {
   order?: {
     column: string;
     ascending?: boolean;
+    nullsFirst?: boolean;
   };
 }
 

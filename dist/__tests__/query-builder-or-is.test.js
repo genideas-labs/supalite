@@ -34,12 +34,11 @@ describe('QueryBuilder: or() with .is()', () => {
         // Access the private buildQuery method for testing purposes
         const { query, values } = await qb.buildQuery();
         // Expected SQL structure:
-        // SELECT * FROM "public"."credits" WHERE "wallet_id" = $1 AND "amount" > $2 AND ("valid_until" IS NULL OR "valid_until" > $3)
+        // SELECT * FROM "public"."credits" WHERE "wallet_id" = $1 AND "amount" > $2 AND ("valid_until" IS NULL OR "valid_until" > NOW())
         expect(query).toContain('SELECT * FROM "public"."credits"');
-        expect(query).toContain('WHERE "wallet_id" = $1 AND "amount" > $2 AND ("valid_until" IS NULL OR "valid_until" > $3)');
-        expect(values).toHaveLength(3);
+        expect(query).toContain('WHERE "wallet_id" = $1 AND "amount" > $2 AND ("valid_until" IS NULL OR "valid_until" > NOW())');
+        expect(values).toHaveLength(2);
         expect(values[0]).toBe(123);
         expect(values[1]).toBe(0);
-        expect(values[2]).toBe('now()'); // now() is treated as a string value
     });
 });

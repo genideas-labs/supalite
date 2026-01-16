@@ -7,8 +7,9 @@ export declare class QueryBuilder<T extends DatabaseSchema, S extends SchemaName
     private table;
     private schema;
     private selectColumns;
-    private joinClauses;
+    private selectSelection;
     private whereConditions;
+    private joinWhereConditions;
     private orConditions;
     private countOption?;
     private headOption?;
@@ -21,10 +22,22 @@ export declare class QueryBuilder<T extends DatabaseSchema, S extends SchemaName
     private insertData?;
     private updateData?;
     private conflictTarget?;
+    private ignoreDuplicates?;
     private client;
     private verbose;
     constructor(pool: Pool, client: SupaLitePG<T>, // Accept SupaLitePG instance
     table: K, schema?: S, verbose?: boolean);
+    private splitColumn;
+    private splitTopLevel;
+    private splitOrConditions;
+    private splitOrCondition;
+    private unescapeOrValue;
+    private parseSelection;
+    private quoteIdentifier;
+    private quoteColumn;
+    private getJoinConditions;
+    private collectJoinPaths;
+    private buildSelectList;
     then<TResult1 = QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>>, TResult2 = never>(onfulfilled?: ((value: QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>>) => TResult1 | PromiseLike<TResult1>) | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null): Promise<TResult1 | TResult2>;
     catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null): Promise<QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>> | TResult>;
     finally(onfinally?: (() => void) | null): Promise<QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>>>;
@@ -45,8 +58,10 @@ export declare class QueryBuilder<T extends DatabaseSchema, S extends SchemaName
     gte(column: string, value: any): this;
     lt(column: string, value: any): this;
     lte(column: string, value: any): this;
+    like(column: string, pattern: string): this;
     order(column: string, options?: {
         ascending?: boolean;
+        nullsFirst?: boolean;
     }): this;
     limit(value: number): this;
     offset(value: number): this;
@@ -57,15 +72,21 @@ export declare class QueryBuilder<T extends DatabaseSchema, S extends SchemaName
     returns<NewS extends SchemaName<T>, NewK extends TableName<T, NewS>>(): QueryBuilder<T, NewS, NewK>;
     range(from: number, to: number): this;
     upsert(values: InsertRow<T, S, K>, options?: {
-        onConflict: string | string[];
+        onConflict?: string | string[];
+        ignoreDuplicates?: boolean;
     }): this;
     private formatConflictTarget;
     private quoteConflictTargetColumn;
     private shouldReturnData;
     private buildWhereClause;
     private buildQuery;
+    private parseExplainPlanRows;
+    private estimateCount;
     execute(): Promise<QueryResult<Row<T, S, K>> | SingleQueryResult<Row<T, S, K>>>;
-    insert(data: InsertRow<T, S, K> | InsertRow<T, S, K>[]): this;
+    insert(data: InsertRow<T, S, K> | InsertRow<T, S, K>[], options?: {
+        onConflict?: string | string[];
+        ignoreDuplicates?: boolean;
+    }): this;
     update(data: UpdateRow<T, S, K>): this;
     delete(): this;
 }
