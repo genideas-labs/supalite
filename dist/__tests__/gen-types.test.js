@@ -67,8 +67,8 @@ describe('generateTypes', () => {
         expect(output).toContain(`id: bigint;`);
         expect(output).toContain(`id?: bigint;`);
         expect(output).toContain(`gen_types_users_view: {`);
-        expect(output).toContain(`gen_types_scalar: { Args: Record<string, unknown>; Returns: unknown; };`);
-        expect(output).toContain(`gen_types_set: { Args: Record<string, unknown>; Returns: unknown[]; };`);
+        expect(output).toContain(`gen_types_scalar: { Args: Record<string, never>; Returns: number; };`);
+        expect(output).toContain(`gen_types_set: { Args: Record<string, never>; Returns: number[]; };`);
         expect(outputWithDates).toContain(`created_at: Date;`);
         expect(outputWithDates).toContain(`created_at?: Date;`);
         expect(outputWithMeta).toContain(`foreignKeyName: 'gen_types_profiles_user_id_fkey';`);
@@ -89,7 +89,7 @@ describe('generateTypes', () => {
         expect(outputSupabase).toContain(`export type Database = {`);
         expect(outputSupabase).toContain(`export const Constants = {`);
         expect(outputSupabase).toContain(`id: number`);
-        expect(outputSupabase).toContain(`Args: never`);
+        expect(outputSupabase).toContain(`Args: Record<PropertyKey, never>`);
         expect(outputSupabase).toContain(`foreignKeyName: "gen_types_profiles_user_id_fkey"`);
         expect(outputSupabase).toContain(`Database["public"]["CompositeTypes"]["gen_types_payload"]`);
     });

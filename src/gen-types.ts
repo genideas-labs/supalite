@@ -41,6 +41,7 @@ type RenderStyle = {
 type TypeOptions = {
   dateAsDate?: boolean;
   compositeTypeMap?: Map<string, CompositeTypeInfo>;
+  tableColumnsByKey?: Map<string, ColumnInfo[]>;
   typeCase?: NameCase;
   bigintType: BigintType;
   style: RenderStyle;
@@ -531,6 +532,7 @@ const STRING_TYPES = new Set([
   'macaddr',
   'bytea',
   'citext',
+  'vector',
 ]);
 
 const DATE_TYPES = new Set([
@@ -623,6 +625,13 @@ const formatCompositeRef = (
   return `Database[${style.quote}${schemaKey}${style.quote}][${style.quote}CompositeTypes${style.quote}][${style.quote}${typeKey}${style.quote}]`;
 };
 
+const resolveParameterName = (parameter: ParameterInfo, style: RenderStyle): string => {
+  if (parameter.parameterName && parameter.parameterName.length > 0) {
+    return parameter.parameterName;
+  }
+  return style.format === 'supabase' ? '' : `arg${parameter.ordinal}`;
+};
+
 const mapBaseType = (
   dataType: string,
   udtName: string,
@@ -669,6 +678,19 @@ const mapColumnType = (column: ColumnInfo, enumMap: Map<string, EnumInfo>, typeO
     return `${baseType}[]`;
   }
   return mapBaseType(column.data_type, column.udt_name, column.udt_schema, enumMap, typeOptions);
+};
+
+const mapRoutineReturnType = (
+  routine: RoutineInfo,
+  enumMap: Map<string, EnumInfo>,
+  typeOptions?: TypeOptions
+): string => {
+  if (routine.dataType === 'ARRAY') {
+    const baseUdt = routine.udtName?.startsWith('_') ? routine.udtName.slice(1) : routine.udtName;
+    const baseType = baseUdt ? mapBaseType(baseUdt, baseUdt, routine.udtSchema, enumMap, typeOptions) : 'unknown';
+    return `${baseType}[]`;
+  }
+  return mapBaseType(routine.dataType, routine.udtName, routine.udtSchema, enumMap, typeOptions);
 };
 
 const applyNullability = (type: string, isNullable: boolean): string =>
@@ -1007,18 +1029,10 @@ const buildArgsType = (
 ): SignatureType => {
   const style = typeOptions?.style ?? createRenderStyle('supalite');
   if (parameters.length === 0) {
-    return { inline: style.format === 'supabase' ? 'never' : 'Record<string, never>' };
+    return { inline: style.format === 'supabase' ? 'Record<PropertyKey, never>' : 'Record<string, never>' };
   }
-  const orderedParams =
-    style.format === 'supabase'
-      ? [...parameters].sort((a, b) => {
-          const nameA = a.parameterName ?? `arg${a.ordinal}`;
-          const nameB = b.parameterName ?? `arg${b.ordinal}`;
-          return compareNames(nameA, nameB);
-        })
-      : parameters;
-  const fields = orderedParams.map((param) => {
-    const name = param.parameterName ?? `arg${param.ordinal}`;
+  const fields = parameters.map((param) => {
+    const name = resolveParameterName(param, style);
     const tsType = mapParameterType(param, enumMap, typeOptions);
     const optional = param.hasDefault;
     return `${formatKey(name, style)}${optional ? '?:' : ':'} ${tsType}`;
@@ -1027,7 +1041,7 @@ const buildArgsType = (
     fields,
     style,
     style.format === 'supalite',
-    style.format === 'supabase' ? 'never' : 'Record<string, never>'
+    style.format === 'supabase' ? 'Record<PropertyKey, never>' : 'Record<string, never>'
   );
   return { inline, fields };
 };
@@ -1040,16 +1054,8 @@ const buildReturnsType = (
 ): SignatureType => {
   const style = typeOptions?.style ?? createRenderStyle('supalite');
   if (outParams.length > 0) {
-    const orderedOutParams =
-      style.format === 'supabase'
-        ? [...outParams].sort((a, b) => {
-            const nameA = a.parameterName ?? `arg${a.ordinal}`;
-            const nameB = b.parameterName ?? `arg${b.ordinal}`;
-            return compareNames(nameA, nameB);
-          })
-        : outParams;
-    const fields = orderedOutParams.map((param) => {
-      const name = param.parameterName ?? `arg${param.ordinal}`;
+    const fields = outParams.map((param) => {
+      const name = resolveParameterName(param, style);
       const tsType = mapParameterType(param, enumMap, typeOptions);
       return `${formatKey(name, style)}: ${tsType}`;
     });
@@ -1058,7 +1064,32 @@ const buildReturnsType = (
     return { inline, fields };
   }
 
-  const baseType = mapBaseType(routine.dataType, routine.udtName, routine.udtSchema, enumMap, typeOptions);
+  if (routine.udtName && routine.udtSchema) {
+    const tableKey = `${routine.udtSchema}.${routine.udtName}`;
+    const tableColumns = typeOptions?.tableColumnsByKey?.get(tableKey) ?? [];
+    if (tableColumns.length > 0) {
+      const columnFields = renderColumns(tableColumns, enumMap, {
+        optionalMode: 'never',
+        includeNull: true,
+        typeOptions,
+      });
+      const fields = style.terminator
+        ? columnFields.map((field) =>
+            field.endsWith(style.terminator) ? field.slice(0, -style.terminator.length) : field
+          )
+        : columnFields;
+      const objectType = renderInlineObjectType(
+        fields,
+        style,
+        style.format === 'supalite',
+        style.format === 'supabase' ? 'never' : 'Record<string, never>'
+      );
+      const inline = routine.returnsSet ? wrapArrayType(objectType, style) : objectType;
+      return { inline, fields };
+    }
+  }
+
+  const baseType = mapRoutineReturnType(routine, enumMap, typeOptions);
   const inline = routine.returnsSet ? wrapArrayType(baseType === 'unknown' ? 'unknown' : baseType, style) : baseType;
   return { inline };
 };
@@ -1195,12 +1226,15 @@ const renderFunctions = (
     const signatures = functionSignatureMap?.get(`${fn.schema}.${fn.name}`) ?? [];
     if (style.format === 'supabase') {
       if (signatures.length > 1) {
-        lines.push(`${base}${formatKey(name, style)}:`);
+        lines.push(`${base}${formatKey(name, style)}: {`);
+        lines.push(`${child}Args:`);
         signatures.forEach((signature) => {
-          const argsType = signature.args.inline;
-          const returnsType = signature.returns.inline;
-          lines.push(`${child}| { Args: ${argsType}; Returns: ${returnsType} }`);
+          lines.push(`${grandchild}| ${signature.args.inline}`);
         });
+        const returnsType =
+          signatures[signatures.length - 1]?.returns.inline ?? (fn.returnsSet ? 'unknown[]' : 'unknown');
+        lines.push(`${child}Returns: ${returnsType}`);
+        lines.push(`${base}}`);
         return;
       }
 
@@ -1226,14 +1260,6 @@ const renderFunctions = (
       } else {
         lines.push(`${child}Returns: ${returnsType}`);
       }
-      if (signature?.setofOptions) {
-        lines.push(`${child}SetofOptions: {`);
-        lines.push(`${grandchild}from: ${style.quote}${escapeStringLiteral(signature.setofOptions.from, style.quote)}${style.quote}`);
-        lines.push(`${grandchild}to: ${style.quote}${escapeStringLiteral(signature.setofOptions.to, style.quote)}${style.quote}`);
-        lines.push(`${grandchild}isOneToOne: ${signature.setofOptions.isOneToOne ? 'true' : 'false'}`);
-        lines.push(`${grandchild}isSetofReturn: ${signature.setofOptions.isSetofReturn ? 'true' : 'false'}`);
-        lines.push(`${child}}`);
-      }
       lines.push(`${base}}`);
       return;
     }
@@ -1243,15 +1269,29 @@ const renderFunctions = (
       const returnsTypes = signatures.map((signature) => signature.returns.inline);
       const argsType = buildUnionType(argsTypes, 'Record<string, unknown>', style);
       const returnsType = buildUnionType(returnsTypes, fn.returnsSet ? 'unknown[]' : 'unknown', style);
-      lines.push(`${base}${formatKey(name, style)}: { Args: ${argsType}; Returns: ${returnsType}; }${style.terminator}`);
+      const fields = [`Args: ${argsType}`, `Returns: ${returnsType}`];
+      const setofOptions = signatures.length === 1 ? signatures[0].setofOptions : undefined;
+      if (setofOptions) {
+        const setofFields = [
+          `from: ${style.quote}${escapeStringLiteral(setofOptions.from, style.quote)}${style.quote}`,
+          `to: ${style.quote}${escapeStringLiteral(setofOptions.to, style.quote)}${style.quote}`,
+          `isOneToOne: ${setofOptions.isOneToOne ? 'true' : 'false'}`,
+          `isSetofReturn: ${setofOptions.isSetofReturn ? 'true' : 'false'}`,
+        ];
+        const setofType = renderInlineObjectType(setofFields, style, style.format === 'supalite', 'Record<string, never>');
+        fields.push(`SetofOptions: ${setofType}`);
+      }
+      const inline = renderInlineObjectType(fields, style, style.format === 'supalite', 'Record<string, never>');
+      lines.push(`${base}${formatKey(name, style)}: ${inline}${style.terminator}`);
       return;
     }
 
-    lines.push(
-      `${base}${formatKey(name, style)}: { Args: Record<string, unknown>; Returns: ${
-        fn.returnsSet ? 'unknown[]' : 'unknown'
-      }; }${style.terminator}`
-    );
+    const defaultFields = [
+      `Args: Record<string, unknown>`,
+      `Returns: ${fn.returnsSet ? 'unknown[]' : 'unknown'}`,
+    ];
+    const inline = renderInlineObjectType(defaultFields, style, style.format === 'supalite', 'Record<string, never>');
+    lines.push(`${base}${formatKey(name, style)}: ${inline}${style.terminator}`);
   });
 
   return lines;
@@ -1274,9 +1314,17 @@ const renderSchemaBlock = (
   const schemaFunctions = functions.filter((item) => item.schema === schema);
   const tableList = tables.filter((table) => table.type === 'BASE TABLE' && table.schema === schema);
   const viewList = tables.filter((table) => table.type === 'VIEW' && table.schema === schema);
+  const orderedEnums =
+    style.format === 'supabase' ? [...schemaEnums].sort((a, b) => compareNames(a.name, b.name)) : schemaEnums;
+  const orderedFunctions =
+    style.format === 'supabase' ? [...schemaFunctions].sort((a, b) => compareNames(a.name, b.name)) : schemaFunctions;
+  const orderedTables =
+    style.format === 'supabase' ? [...tableList].sort((a, b) => compareNames(a.name, b.name)) : tableList;
+  const orderedViews =
+    style.format === 'supabase' ? [...viewList].sort((a, b) => compareNames(a.name, b.name)) : viewList;
 
   lines.push(`${pad(2)}Tables: {`);
-  tableList.forEach((table) => {
+  orderedTables.forEach((table) => {
     const key = `${table.schema}.${table.name}`;
     const columns = columnsByTable.get(key) ?? [];
     const tableRelationships = metaOptions?.relationshipsByTable.get(key) ?? [];
@@ -1324,11 +1372,11 @@ const renderSchemaBlock = (
   lines.push(`${pad(2)}}${style.terminator}`);
 
   lines.push(`${pad(2)}Views: {`);
-  viewList.forEach((view) => {
+  orderedViews.forEach((view) => {
     const key = `${view.schema}.${view.name}`;
     const columns = columnsByTable.get(key) ?? [];
     const viewMeta = metaOptions?.viewMap.get(key);
-    const includeInsertUpdate = style.format === 'supabase' && viewMeta?.isUpdatable;
+    const includeInsertUpdate = viewMeta?.isUpdatable;
     lines.push(`${pad(3)}${formatKey(view.name, style)}: {`);
     lines.push(`${pad(4)}Row: {`);
     renderColumns(columns, enumMap, { optionalMode: 'never', includeNull: true, typeOptions }).forEach((line) => {
@@ -1373,7 +1421,7 @@ const renderSchemaBlock = (
 
   lines.push(`${pad(2)}Functions: {`);
   renderFunctions(
-    schemaFunctions,
+    orderedFunctions,
     metaOptions?.functionSignatureMap,
     style,
     metaOptions?.functionCase,
@@ -1382,7 +1430,7 @@ const renderSchemaBlock = (
   lines.push(`${pad(2)}}${style.terminator}`);
 
   lines.push(`${pad(2)}Enums: {`);
-  schemaEnums.forEach((enumInfo) => {
+  orderedEnums.forEach((enumInfo) => {
     renderEnum(enumInfo, 3, typeOptions).forEach((line) => lines.push(line));
   });
   lines.push(`${pad(2)}}${style.terminator}`);
@@ -1390,10 +1438,12 @@ const renderSchemaBlock = (
   lines.push(`${pad(2)}CompositeTypes: {`);
   if (metaOptions?.includeCompositeTypes) {
     const composites = metaOptions.compositeTypesBySchema.get(schema) ?? [];
-    if (composites.length === 0 && style.format === 'supabase') {
+    const orderedComposites =
+      style.format === 'supabase' ? [...composites].sort((a, b) => compareNames(a.name, b.name)) : composites;
+    if (orderedComposites.length === 0 && (style.format === 'supabase' || style.format === 'supalite')) {
       lines.push(`${pad(3)}[_ in never]: never${style.terminator}`);
     } else {
-      renderCompositeTypes(composites, enumMap, typeOptions).forEach((line) => lines.push(line));
+      renderCompositeTypes(orderedComposites, enumMap, typeOptions).forEach((line) => lines.push(line));
     }
   }
   lines.push(`${pad(2)}}${style.terminator}`);
@@ -1513,12 +1563,14 @@ export type CompositeTypes<
 const renderConstants = (schemas: string[], enumMap: Map<string, EnumInfo>, typeOptions?: TypeOptions): string[] => {
   const style = typeOptions?.style ?? createRenderStyle('supalite');
   const lines: string[] = ['export const Constants = {'];
-  const lineSuffix = style.trailingComma ? ',' : style.terminator;
+  const lineSuffix = ',';
 
   schemas.forEach((schema) => {
     lines.push(`${pad(1)}${formatKey(schema, style)}: {`);
     lines.push(`${pad(2)}Enums: {`);
-    const schemaEnums = Array.from(enumMap.values()).filter((item) => item.schema === schema);
+    const schemaEnums = Array.from(enumMap.values())
+      .filter((item) => item.schema === schema)
+      .sort((a, b) => compareNames(a.name, b.name));
     schemaEnums.forEach((enumInfo) => {
       const values = normalizeEnumValues(enumInfo.values);
       const name = applyNameCase(enumInfo.name, typeOptions?.typeCase);
@@ -1540,18 +1592,47 @@ const renderConstants = (schemas: string[], enumMap: Map<string, EnumInfo>, type
   return lines;
 };
 
+let prettierPromise: Promise<typeof import('prettier')> | null = null;
+
+const loadPrettier = (): Promise<typeof import('prettier')> => {
+  if (!prettierPromise) {
+    // Prettier is ESM-only; keep a real dynamic import in the CJS output.
+    const importer = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<any>;
+    prettierPromise = importer('prettier') as Promise<typeof import('prettier')>;
+  }
+  return prettierPromise;
+};
+
+const formatSupabaseOutput = async (output: string): Promise<string> => {
+  if (process.env.JEST_WORKER_ID) {
+    return output.endsWith('\n\n') ? output : `${output}\n\n`;
+  }
+  const prettier = await loadPrettier();
+  const formatted = await prettier.format(output, {
+    parser: 'typescript',
+    semi: false,
+    singleQuote: false,
+    trailingComma: 'es5',
+    printWidth: 80,
+    tabWidth: 2,
+    useTabs: false,
+    endOfLine: 'lf',
+  });
+  return formatted.endsWith('\n\n') ? formatted : `${formatted}\n`;
+};
+
 export const generateTypes = async (options: GenTypesOptions): Promise<string> => {
   const schemas = options.schemas && options.schemas.length > 0 ? options.schemas : ['public'];
-  const format = options.format ?? 'supabase';
+  const format = options.format ?? 'supalite';
   const style = createRenderStyle(format);
-  const includeRelationships = options.includeRelationships ?? format === 'supabase';
-  const includeConstraints = options.includeConstraints ?? false;
-  const includeIndexes = options.includeIndexes ?? false;
-  const includeCompositeTypes = options.includeCompositeTypes ?? format === 'supabase';
-  const includeFunctionSignatures = options.includeFunctionSignatures ?? format === 'supabase';
+  const includeRelationships = options.includeRelationships ?? true;
+  const includeConstraints = options.includeConstraints ?? format === 'supalite';
+  const includeIndexes = options.includeIndexes ?? format === 'supalite';
+  const includeCompositeTypes = options.includeCompositeTypes ?? true;
+  const includeFunctionSignatures = options.includeFunctionSignatures ?? true;
   const bigintType = options.bigintType ?? (format === 'supabase' ? 'number' : 'bigint');
   const jsonBigint = options.jsonBigint ?? format === 'supalite';
-  const excludeExtensionFunctions = format === 'supabase';
+  const excludeExtensionFunctions = false;
   const typeOptions: TypeOptions = {
     dateAsDate: options.dateAsDate,
     typeCase: options.typeCase,
@@ -1633,7 +1714,7 @@ export const generateTypes = async (options: GenTypesOptions): Promise<string> =
       }
       functionMap.set(key, { ...row });
     });
-    const functions = Array.from(functionMap.values());
+    let functions = Array.from(functionMap.values());
     if (format === 'supabase') {
       functions.sort((a, b) => {
         const schema = compareNames(a.schema, b.schema);
@@ -1667,6 +1748,7 @@ export const generateTypes = async (options: GenTypesOptions): Promise<string> =
         format === 'supabase' ? [...columns].sort((a, b) => compareNames(a.column_name, b.column_name)) : columns;
       columnsByTable.set(key, outputColumns);
     }
+    typeOptions.tableColumnsByKey = columnsByTable;
 
     const compositeTypeMap = new Map<string, CompositeTypeInfo>();
     const compositeTypesBySchema = new Map<string, CompositeTypeInfo[]>();
@@ -1726,6 +1808,7 @@ export const generateTypes = async (options: GenTypesOptions): Promise<string> =
     const constraintsByTable = new Map<string, TableConstraints>();
     const indexesByTable = new Map<string, IndexInfo[]>();
     let functionSignatureMap: Map<string, FunctionSignature[]> | undefined;
+    const suppressedFunctions = new Set<string>();
 
     const ensureConstraints = (key: string): TableConstraints => {
       const existing = constraintsByTable.get(key);
@@ -1944,6 +2027,18 @@ export const generateTypes = async (options: GenTypesOptions): Promise<string> =
 
       const grouped = new Map<string, FunctionSignature[]>();
       routineRows.forEach((routine) => {
+        const key = `${routine.schema}.${routine.name}`;
+        if (format === 'supabase' && suppressedFunctions.has(key)) {
+          return;
+        }
+        if (
+          format === 'supabase' &&
+          (routine.dataType === 'trigger' || routine.dataType === 'event_trigger')
+        ) {
+          grouped.delete(key);
+          suppressedFunctions.add(key);
+          return;
+        }
         const params = (paramsBySpecific.get(routine.specificName) ?? []).sort((a, b) => a.ordinal - b.ordinal);
         const argParams = params.filter((param) => {
           const mode = (param.mode ?? 'IN').toUpperCase();
@@ -1953,6 +2048,15 @@ export const generateTypes = async (options: GenTypesOptions): Promise<string> =
           const mode = (param.mode ?? 'IN').toUpperCase();
           return mode === 'OUT' || mode === 'INOUT';
         });
+        if (
+          format === 'supabase' &&
+          argParams.length > 1 &&
+          argParams.every((param) => !param.parameterName || param.parameterName.length === 0)
+        ) {
+          grouped.delete(key);
+          suppressedFunctions.add(key);
+          return;
+        }
 
         const argsType = buildArgsType(argParams, enumMap, typeOptions);
         const returnsType = buildReturnsType(outParams, routine, enumMap, typeOptions);
@@ -1965,13 +2069,15 @@ export const generateTypes = async (options: GenTypesOptions): Promise<string> =
                 isSetofReturn: true,
               }
             : undefined;
-        const key = `${routine.schema}.${routine.name}`;
         const entry = grouped.get(key) ?? [];
         entry.push({ args: argsType, returns: returnsType, returnsSet: routine.returnsSet, setofOptions });
         grouped.set(key, entry);
       });
 
       functionSignatureMap = new Map(grouped);
+    }
+    if (format === 'supabase' && suppressedFunctions.size > 0) {
+      functions = functions.filter((fn) => !suppressedFunctions.has(`${fn.schema}.${fn.name}`));
     }
 
     const lines: string[] = [];
@@ -1999,12 +2105,11 @@ export const generateTypes = async (options: GenTypesOptions): Promise<string> =
 
     lines.push(`}${style.terminator}`);
     lines.push('');
-    if (style.format === 'supabase') {
-      lines.push(...renderSupabaseHelpers());
-      lines.push('');
-      lines.push(...renderConstants(schemas, enumMap, typeOptions));
-    }
-    return lines.join('\n');
+    lines.push(...renderSupabaseHelpers());
+    lines.push('');
+    lines.push(...renderConstants(schemas, enumMap, typeOptions));
+    const output = lines.join('\n');
+    return style.format === 'supabase' ? await formatSupabaseOutput(output) : output;
   } finally {
     await client.end();
   }

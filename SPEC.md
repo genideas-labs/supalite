@@ -155,7 +155,10 @@ Notes:
 - `supalite gen types --db-url <postgres_url> [--schema public,analytics] [--out supalite.types.ts]`
 - Reads schema metadata from `information_schema` and `pg_catalog`.
 - Emits `Json` and a `Database` type with `Tables`, `Views`, `Functions`, `Enums`, and `CompositeTypes`.
-- `BIGINT` maps to `bigint`; `json/jsonb` map to `Json`.
+- `--format supalite|supabase` (default: supalite).
+- `--format supabase` matches Supabase CLI output (including formatting).
+- SupaLite format is a superset of Supabase: `Constraints`/`Indexes`, `referencedSchema` in `Relationships`, `bigint` defaults, `Json` bigint, and `SetofOptions` for setof RPCs.
+- `BIGINT` maps to `bigint` by default (`--format supabase` defaults to `number`); `json/jsonb` map to `Json`.
 - `--date-as-date` maps `date`/`timestamp` columns to `Date`.
 - `--include-relationships` emits FK metadata in `Relationships`.
 - `--include-constraints` emits PK/UNIQUE/CHECK/FK metadata per table.

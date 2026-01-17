@@ -28,13 +28,13 @@ const printUsage = () => {
 Defaults:
 - schema: public
 - out: supalite.types.ts (use --out - to print to stdout)
-- format: supabase
+- format: supalite
 - dateAsDate: false
-- includeRelationships: true (supabase), false (supalite)
-- includeConstraints: false
-- includeIndexes: false
-- includeCompositeTypes: true (supabase), false (supalite)
-- includeFunctionSignatures: true (supabase), false (supalite)
+- includeRelationships: true
+- includeConstraints: false (supabase), true (supalite)
+- includeIndexes: false (supabase), true (supalite)
+- includeCompositeTypes: true
+- includeFunctionSignatures: true
 - bigintType: number (supabase), bigint (supalite)
 - jsonBigint: false (supabase), true (supalite)
 - typeCase: preserve

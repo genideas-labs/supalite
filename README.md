@@ -58,7 +58,7 @@ ORM features (relations, nested writes, etc.) are best handled by Prisma/Drizzle
 
 About `supabase db pull`: it is a schema/migration sync step, not an ORM feature. Rather than implementing it inside SupaLite, we recommend documenting the workflow and optionally providing a lightweight CLI wrapper that combines `pg-schema-sync` + type generation.
 
-SupaLite now includes `supalite gen types`, which defaults to Supabase CLI-compatible output and can emit the legacy SupaLite format via `--format supalite`.
+SupaLite now includes `supalite gen types`, which defaults to the SupaLite format (a superset of Supabase CLI output). Use `--format supabase` for byte-for-byte Supabase CLI output.
 
 ## SupaLite vs Prisma / Drizzle
 
@@ -130,7 +130,7 @@ const data = await db
 - CI matrix for Node/pg versions with integration tests
 - Benchmarks and performance guidance
 - Auth/Storage/Realtime migration guidance (Cognito/GIP, S3/GCS, Realtime options)
-- `supalite gen types` (Supabase-compatible type generator)
+- `supalite gen types` (SupaLite-first generator with Supabase-compatible output)
 - Contribution guide and issue templates
 
 ## Performance notes (serverless Supabase vs cloud Postgres)
@@ -255,16 +255,17 @@ npx supalite gen types --db-url "postgresql://user:pass@localhost:5432/db" --sch
 ```
 
 - `--out -` prints to stdout
-- Default output matches Supabase CLI. Use `--format supalite` for the legacy SupaLite style.
+- Default output is SupaLite format (superset of Supabase CLI). Use `--format supabase` for byte-for-byte Supabase CLI output.
+- SupaLite format also includes `Constraints`/`Indexes`, `referencedSchema` in `Relationships`, `bigint` + `Json` bigint support, and `SetofOptions` for setof RPCs.
 - BIGINT type mapping is controlled by `--bigint-type bigint|number|string` (default: supabase=number, supalite=bigint)
-- `--json-bigint` includes `bigint` in the `Json` union
+- `--json-bigint` includes `bigint` in the `Json` union (default: supabase=false, supalite=true)
 - `--date-as-date` maps `date`/`timestamp` columns to `Date`
-- `--include-relationships` emits foreign-key metadata into `Relationships`
-- `--include-constraints` emits primary/unique/check/foreign key metadata
-- `--include-indexes` emits index metadata (name, uniqueness, definition)
-- `--include-composite-types` emits `CompositeTypes` definitions
-- `--include-function-signatures` maps `Functions.Args/Returns` from schema metadata
-- `Functions` always lists detected function names; use `--include-function-signatures` for RPC Args/Returns reference
+- `--include-relationships` emits foreign-key metadata into `Relationships` (default: true)
+- `--include-constraints` emits primary/unique/check/foreign key metadata (default: supabase=false, supalite=true)
+- `--include-indexes` emits index metadata (name, uniqueness, definition) (default: supabase=false, supalite=true)
+- `--include-composite-types` emits `CompositeTypes` definitions (default: true)
+- `--include-function-signatures` maps `Functions.Args/Returns` from schema metadata (default: true)
+- `Functions` always lists detected function names; signatures are included by default
 - `--type-case` controls enum/composite type key casing (`preserve` | `snake` | `camel` | `pascal`)
 - `--function-case` controls function key casing (`preserve` | `snake` | `camel` | `pascal`)
 - `--dump-functions-sql [path]` writes `CREATE FUNCTION/PROCEDURE` definitions (from `pg_get_functiondef`) to a local file

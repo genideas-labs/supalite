@@ -57,7 +57,7 @@ ORM 기능(관계 모델링/중첩 쓰기 등)이 꼭 필요하면 Prisma/Drizzl
 
 `supabase db pull`에 대해서: 이는 ORM 기능이 아니라 마이그레이션/스키마 동기화 단계입니다. SupaLite 내부에 구현하기보다 “권장 워크플로우”로 문서화하고, 필요하다면 `pg-schema-sync` + 타입 생성기를 묶는 간단한 CLI 래퍼가 현실적입니다.
 
-SupaLite는 `supalite gen types`를 포함하며, 기본 출력은 Supabase CLI와 호환되고 `--format supalite`로 기존 SupaLite 포맷을 유지할 수 있습니다.
+SupaLite는 `supalite gen types`를 포함하며, 기본 출력은 SupaLite 포맷(Supabase CLI 출력의 상위 집합)입니다. Supabase CLI와 1:1로 맞추려면 `--format supabase`를 사용하세요.
 
 ## SupaLite vs Prisma / Drizzle
 
@@ -129,7 +129,7 @@ const data = await db
 - Node/pg 버전별 CI 매트릭스와 통합 테스트
 - 벤치마크 및 성능 가이드
 - Auth/Storage/Realtime 마이그레이션 가이드 (Cognito/GIP, S3/GCS, Realtime 대안)
-- `supalite gen types` (Supabase 호환 타입 생성기)
+- `supalite gen types` (SupaLite 중심 타입 생성기, Supabase 포맷 옵션 제공)
 - 기여 가이드/이슈 템플릿
 
 ## 성능 노트 (서버리스 Supabase vs 클라우드 Postgres)
@@ -254,16 +254,17 @@ npx supalite gen types --db-url "postgresql://user:pass@localhost:5432/db" --sch
 ```
 
 - `--out -`는 stdout으로 출력합니다.
-- 기본 출력은 Supabase CLI 포맷입니다. SupaLite 기존 포맷은 `--format supalite`를 사용하세요.
+- 기본 출력은 SupaLite 포맷(= Supabase CLI의 상위 집합)입니다. Supabase CLI와 1:1로 맞추려면 `--format supabase`를 사용하세요.
+- SupaLite 포맷은 `Constraints`/`Indexes`, `Relationships`의 `referencedSchema`, `bigint` + `Json` bigint 지원, setof RPC용 `SetofOptions`를 추가로 포함합니다.
 - BIGINT 컬럼 타입은 `--bigint-type bigint|number|string`로 제어합니다. (기본: supabase=number, supalite=bigint)
-- `--json-bigint`는 `Json` 타입에 `bigint`를 포함합니다.
+- `--json-bigint`는 `Json` 타입에 `bigint`를 포함합니다. (기본: supabase=false, supalite=true)
 - `--date-as-date`는 `date`/`timestamp` 컬럼을 `Date`로 생성합니다.
-- `--include-relationships`는 FK 메타데이터를 `Relationships`에 포함합니다.
-- `--include-constraints`는 PK/UNIQUE/CHECK/FK 메타데이터를 포함합니다.
-- `--include-indexes`는 인덱스 메타데이터(이름/유니크/정의)를 포함합니다.
-- `--include-composite-types`는 `CompositeTypes` 정의를 포함합니다.
-- `--include-function-signatures`는 `Functions.Args/Returns`를 스키마 메타데이터로 매핑합니다.
-- `Functions`에는 감지된 함수명이 기본 포함되며, `--include-function-signatures`로 RPC Args/Returns 참고가 가능합니다.
+- `--include-relationships`는 FK 메타데이터를 `Relationships`에 포함합니다. (기본: true)
+- `--include-constraints`는 PK/UNIQUE/CHECK/FK 메타데이터를 포함합니다. (기본: supabase=false, supalite=true)
+- `--include-indexes`는 인덱스 메타데이터(이름/유니크/정의)를 포함합니다. (기본: supabase=false, supalite=true)
+- `--include-composite-types`는 `CompositeTypes` 정의를 포함합니다. (기본: true)
+- `--include-function-signatures`는 `Functions.Args/Returns`를 스키마 메타데이터로 매핑합니다. (기본: true)
+- `Functions`에는 감지된 함수명이 기본 포함되며, 시그니처도 기본 포함됩니다.
 - `--type-case`는 enum/composite 타입 키의 케이스를 제어합니다 (`preserve` | `snake` | `camel` | `pascal`)
 - `--function-case`는 함수 키의 케이스를 제어합니다 (`preserve` | `snake` | `camel` | `pascal`)
 - `--dump-functions-sql [path]`는 `pg_get_functiondef` 기반의 `CREATE FUNCTION/PROCEDURE` 정의를 로컬 파일로 저장합니다.
