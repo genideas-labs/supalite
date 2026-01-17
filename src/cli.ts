@@ -7,6 +7,10 @@ const printUsage = (): void => {
   --db-url <postgres_url> \\
   [--schema public,analytics] \\
   [--out supalite.types.ts] \\
+  [--format supabase|supalite] \\
+  [--bigint-type bigint|number|string] \\
+  [--json-bigint] \\
+  [--no-json-bigint] \\
   [--date-as-date] \\
   [--include-relationships] \\
   [--include-constraints] \\
@@ -20,12 +24,15 @@ const printUsage = (): void => {
 Defaults:
 - schema: public
 - out: supalite.types.ts (use --out - to print to stdout)
+- format: supabase
 - dateAsDate: false
-- includeRelationships: false
+- includeRelationships: true (supabase), false (supalite)
 - includeConstraints: false
 - includeIndexes: false
-- includeCompositeTypes: false
-- includeFunctionSignatures: false
+- includeCompositeTypes: true (supabase), false (supalite)
+- includeFunctionSignatures: true (supabase), false (supalite)
+- bigintType: number (supabase), bigint (supalite)
+- jsonBigint: false (supabase), true (supalite)
 - typeCase: preserve
 - functionCase: preserve
 - dumpFunctionsSql: false
@@ -42,17 +49,40 @@ const parseCase = (value?: string) => {
   return undefined;
 };
 
+const parseFormat = (value?: string) => {
+  if (!value) {
+    return undefined;
+  }
+  if (value === 'supabase' || value === 'supalite') {
+    return value;
+  }
+  return undefined;
+};
+
+const parseBigintType = (value?: string) => {
+  if (!value) {
+    return undefined;
+  }
+  if (value === 'bigint' || value === 'number' || value === 'string') {
+    return value;
+  }
+  return undefined;
+};
+
 const parseArgs = (args: string[]) => {
   const result: {
     dbUrl?: string;
     schemas: string[];
     out: string;
+    format?: 'supabase' | 'supalite';
+    bigintType?: 'bigint' | 'number' | 'string';
+    jsonBigint?: boolean;
     dateAsDate: boolean;
-    includeRelationships: boolean;
+    includeRelationships?: boolean;
     includeConstraints: boolean;
     includeIndexes: boolean;
-    includeCompositeTypes: boolean;
-    includeFunctionSignatures: boolean;
+    includeCompositeTypes?: boolean;
+    includeFunctionSignatures?: boolean;
     typeCase?: 'preserve' | 'snake' | 'camel' | 'pascal';
     functionCase?: 'preserve' | 'snake' | 'camel' | 'pascal';
     dumpFunctionsSql: boolean;
@@ -61,12 +91,15 @@ const parseArgs = (args: string[]) => {
   } = {
     schemas: [],
     out: 'supalite.types.ts',
+    format: undefined,
+    bigintType: undefined,
+    jsonBigint: undefined,
     dateAsDate: false,
-    includeRelationships: false,
+    includeRelationships: undefined,
     includeConstraints: false,
     includeIndexes: false,
-    includeCompositeTypes: false,
-    includeFunctionSignatures: false,
+    includeCompositeTypes: undefined,
+    includeFunctionSignatures: undefined,
     dumpFunctionsSql: false,
     help: false,
   };
@@ -95,6 +128,24 @@ const parseArgs = (args: string[]) => {
     if (arg === '--out') {
       result.out = args[i + 1] ?? result.out;
       i += 1;
+      continue;
+    }
+    if (arg === '--format') {
+      result.format = parseFormat(args[i + 1]);
+      i += 1;
+      continue;
+    }
+    if (arg === '--bigint-type') {
+      result.bigintType = parseBigintType(args[i + 1]);
+      i += 1;
+      continue;
+    }
+    if (arg === '--json-bigint') {
+      result.jsonBigint = true;
+      continue;
+    }
+    if (arg === '--no-json-bigint') {
+      result.jsonBigint = false;
       continue;
     }
     if (arg === '--date-as-date') {
@@ -169,6 +220,9 @@ const run = async () => {
   const output = await generateTypes({
     dbUrl,
     schemas,
+    format: parsed.format,
+    bigintType: parsed.bigintType,
+    jsonBigint: parsed.jsonBigint,
     dateAsDate: parsed.dateAsDate,
     includeRelationships: parsed.includeRelationships,
     includeConstraints: parsed.includeConstraints,

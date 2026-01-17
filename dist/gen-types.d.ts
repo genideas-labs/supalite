@@ -1,4 +1,6 @@
 type NameCase = 'preserve' | 'snake' | 'camel' | 'pascal';
+type OutputFormat = 'supalite' | 'supabase';
+type BigintType = 'bigint' | 'number' | 'string';
 export type GenTypesOptions = {
     dbUrl: string;
     schemas?: string[];
@@ -10,6 +12,9 @@ export type GenTypesOptions = {
     includeFunctionSignatures?: boolean;
     typeCase?: NameCase;
     functionCase?: NameCase;
+    format?: OutputFormat;
+    bigintType?: BigintType;
+    jsonBigint?: boolean;
 };
 export type DumpFunctionsSqlOptions = {
     dbUrl: string;

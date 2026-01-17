@@ -30,15 +30,17 @@ describe('generateTypes', () => {
   });
 
   test('generates enums, bigint mapping, arrays, views, and functions', async () => {
-    const output = await generateTypes({ dbUrl: connectionString, schemas: ['public', schemaName] });
+    const output = await generateTypes({ dbUrl: connectionString, schemas: ['public', schemaName], format: 'supalite' });
     const outputWithDates = await generateTypes({
       dbUrl: connectionString,
       schemas: ['public', schemaName],
+      format: 'supalite',
       dateAsDate: true,
     });
     const outputWithMeta = await generateTypes({
       dbUrl: connectionString,
       schemas: ['public', schemaName],
+      format: 'supalite',
       includeRelationships: true,
       includeConstraints: true,
       includeIndexes: true,
@@ -46,8 +48,14 @@ describe('generateTypes', () => {
     const outputWithFunctions = await generateTypes({
       dbUrl: connectionString,
       schemas: ['public', schemaName],
+      format: 'supalite',
       includeCompositeTypes: true,
       includeFunctionSignatures: true,
+    });
+    const outputSupabase = await generateTypes({
+      dbUrl: connectionString,
+      schemas: ['public', schemaName],
+      format: 'supabase',
     });
     const functionsSql = await dumpFunctionsSql({ dbUrl: connectionString, schemas: ['public', schemaName] });
 
@@ -85,5 +93,12 @@ describe('generateTypes', () => {
     expect(functionsSql).toContain(`CREATE OR REPLACE FUNCTION public.gen_types_payload`);
     expect(functionsSql).toContain(`CREATE OR REPLACE FUNCTION public.gen_types_scalar`);
     expect(functionsSql).toContain(`CREATE OR REPLACE FUNCTION public.gen_types_set`);
+
+    expect(outputSupabase).toContain(`export type Database = {`);
+    expect(outputSupabase).toContain(`export const Constants = {`);
+    expect(outputSupabase).toContain(`id: number`);
+    expect(outputSupabase).toContain(`Args: never`);
+    expect(outputSupabase).toContain(`foreignKeyName: "gen_types_profiles_user_id_fkey"`);
+    expect(outputSupabase).toContain(`Database["public"]["CompositeTypes"]["gen_types_payload"]`);
   });
 });

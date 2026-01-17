@@ -11,6 +11,10 @@ const printUsage = () => {
   --db-url <postgres_url> \\
   [--schema public,analytics] \\
   [--out supalite.types.ts] \\
+  [--format supabase|supalite] \\
+  [--bigint-type bigint|number|string] \\
+  [--json-bigint] \\
+  [--no-json-bigint] \\
   [--date-as-date] \\
   [--include-relationships] \\
   [--include-constraints] \\
@@ -24,12 +28,15 @@ const printUsage = () => {
 Defaults:
 - schema: public
 - out: supalite.types.ts (use --out - to print to stdout)
+- format: supabase
 - dateAsDate: false
-- includeRelationships: false
+- includeRelationships: true (supabase), false (supalite)
 - includeConstraints: false
 - includeIndexes: false
-- includeCompositeTypes: false
-- includeFunctionSignatures: false
+- includeCompositeTypes: true (supabase), false (supalite)
+- includeFunctionSignatures: true (supabase), false (supalite)
+- bigintType: number (supabase), bigint (supalite)
+- jsonBigint: false (supabase), true (supalite)
 - typeCase: preserve
 - functionCase: preserve
 - dumpFunctionsSql: false
@@ -44,16 +51,37 @@ const parseCase = (value) => {
     }
     return undefined;
 };
+const parseFormat = (value) => {
+    if (!value) {
+        return undefined;
+    }
+    if (value === 'supabase' || value === 'supalite') {
+        return value;
+    }
+    return undefined;
+};
+const parseBigintType = (value) => {
+    if (!value) {
+        return undefined;
+    }
+    if (value === 'bigint' || value === 'number' || value === 'string') {
+        return value;
+    }
+    return undefined;
+};
 const parseArgs = (args) => {
     const result = {
         schemas: [],
         out: 'supalite.types.ts',
+        format: undefined,
+        bigintType: undefined,
+        jsonBigint: undefined,
         dateAsDate: false,
-        includeRelationships: false,
+        includeRelationships: undefined,
         includeConstraints: false,
         includeIndexes: false,
-        includeCompositeTypes: false,
-        includeFunctionSignatures: false,
+        includeCompositeTypes: undefined,
+        includeFunctionSignatures: undefined,
         dumpFunctionsSql: false,
         help: false,
     };
@@ -81,6 +109,24 @@ const parseArgs = (args) => {
         if (arg === '--out') {
             result.out = args[i + 1] ?? result.out;
             i += 1;
+            continue;
+        }
+        if (arg === '--format') {
+            result.format = parseFormat(args[i + 1]);
+            i += 1;
+            continue;
+        }
+        if (arg === '--bigint-type') {
+            result.bigintType = parseBigintType(args[i + 1]);
+            i += 1;
+            continue;
+        }
+        if (arg === '--json-bigint') {
+            result.jsonBigint = true;
+            continue;
+        }
+        if (arg === '--no-json-bigint') {
+            result.jsonBigint = false;
             continue;
         }
         if (arg === '--date-as-date') {
@@ -150,6 +196,9 @@ const run = async () => {
     const output = await (0, gen_types_1.generateTypes)({
         dbUrl,
         schemas,
+        format: parsed.format,
+        bigintType: parsed.bigintType,
+        jsonBigint: parsed.jsonBigint,
         dateAsDate: parsed.dateAsDate,
         includeRelationships: parsed.includeRelationships,
         includeConstraints: parsed.includeConstraints,

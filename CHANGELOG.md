@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.1] - 2026-01-17
+
+### ✨ Added
+- `supalite gen types` 기본 출력이 Supabase CLI 포맷과 최대한 동일하도록 정렬/포맷/헬퍼 타입/Constants를 추가했습니다.
+- `--format supabase|supalite`, `--bigint-type`, `--json-bigint` 옵션을 추가했습니다.
+- Supabase 포맷에서 insertable view에 `Insert`/`Update`를 포함하고, 함수 오버로드 출력 형태를 Supabase와 맞췄습니다.
+
+### 🔧 Changed
+- Supabase 포맷 기본값 기준으로 관계/복합 타입/함수 시그니처가 기본 포함됩니다. (legacy 출력은 `--format supalite`)
+
 ## [0.7.0] - 2026-01-17
 
 ### ✨ Added

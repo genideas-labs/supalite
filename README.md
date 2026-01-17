@@ -58,7 +58,7 @@ ORM features (relations, nested writes, etc.) are best handled by Prisma/Drizzle
 
 About `supabase db pull`: it is a schema/migration sync step, not an ORM feature. Rather than implementing it inside SupaLite, we recommend documenting the workflow and optionally providing a lightweight CLI wrapper that combines `pg-schema-sync` + type generation.
 
-If a SupaLite-native type generator makes sense, we can add a `supalite gen types` CLI in the roadmap.
+SupaLite now includes `supalite gen types`, which defaults to Supabase CLI-compatible output and can emit the legacy SupaLite format via `--format supalite`.
 
 ## SupaLite vs Prisma / Drizzle
 
@@ -255,7 +255,9 @@ npx supalite gen types --db-url "postgresql://user:pass@localhost:5432/db" --sch
 ```
 
 - `--out -` prints to stdout
-- BIGINT columns map to `bigint`
+- Default output matches Supabase CLI. Use `--format supalite` for the legacy SupaLite style.
+- BIGINT type mapping is controlled by `--bigint-type bigint|number|string` (default: supabase=number, supalite=bigint)
+- `--json-bigint` includes `bigint` in the `Json` union
 - `--date-as-date` maps `date`/`timestamp` columns to `Date`
 - `--include-relationships` emits foreign-key metadata into `Relationships`
 - `--include-constraints` emits primary/unique/check/foreign key metadata

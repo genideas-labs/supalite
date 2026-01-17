@@ -57,7 +57,7 @@ ORM 기능(관계 모델링/중첩 쓰기 등)이 꼭 필요하면 Prisma/Drizzl
 
 `supabase db pull`에 대해서: 이는 ORM 기능이 아니라 마이그레이션/스키마 동기화 단계입니다. SupaLite 내부에 구현하기보다 “권장 워크플로우”로 문서화하고, 필요하다면 `pg-schema-sync` + 타입 생성기를 묶는 간단한 CLI 래퍼가 현실적입니다.
 
-SupaLite용 타입 생성기가 필요하다면 `supalite gen types` CLI를 로드맵에 추가할 수 있습니다.
+SupaLite는 `supalite gen types`를 포함하며, 기본 출력은 Supabase CLI와 호환되고 `--format supalite`로 기존 SupaLite 포맷을 유지할 수 있습니다.
 
 ## SupaLite vs Prisma / Drizzle
 
@@ -254,7 +254,9 @@ npx supalite gen types --db-url "postgresql://user:pass@localhost:5432/db" --sch
 ```
 
 - `--out -`는 stdout으로 출력합니다.
-- BIGINT 컬럼은 `bigint`로 생성됩니다.
+- 기본 출력은 Supabase CLI 포맷입니다. SupaLite 기존 포맷은 `--format supalite`를 사용하세요.
+- BIGINT 컬럼 타입은 `--bigint-type bigint|number|string`로 제어합니다. (기본: supabase=number, supalite=bigint)
+- `--json-bigint`는 `Json` 타입에 `bigint`를 포함합니다.
 - `--date-as-date`는 `date`/`timestamp` 컬럼을 `Date`로 생성합니다.
 - `--include-relationships`는 FK 메타데이터를 `Relationships`에 포함합니다.
 - `--include-constraints`는 PK/UNIQUE/CHECK/FK 메타데이터를 포함합니다.
