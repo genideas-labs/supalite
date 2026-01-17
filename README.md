@@ -136,6 +136,7 @@ const data = await db
 - CI matrix for Node/pg versions with integration tests
 - Benchmarks and performance guidance
 - Auth/Storage/Realtime migration guidance (Cognito/GIP, S3/GCS, Realtime options)
+- `supalite db pull` wrapper around `pg-schema-sync` for schema sync
 - `supalite gen types` (SupaLite-first generator with Supabase-compatible output)
 - Contribution guide and issue templates
 

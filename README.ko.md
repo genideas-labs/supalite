@@ -135,6 +135,7 @@ const data = await db
 - Node/pg 버전별 CI 매트릭스와 통합 테스트
 - 벤치마크 및 성능 가이드
 - Auth/Storage/Realtime 마이그레이션 가이드 (Cognito/GIP, S3/GCS, Realtime 대안)
+- `pg-schema-sync` 기반 `supalite db pull` 스키마 동기화 래퍼
 - `supalite gen types` (SupaLite 중심 타입 생성기, Supabase 포맷 옵션 제공)
 - 기여 가이드/이슈 템플릿
 
