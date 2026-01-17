@@ -258,7 +258,9 @@ npx supalite gen types --db-url "postgresql://user:pass@localhost:5432/db" --sch
 - Default output is SupaLite format (superset of Supabase CLI). Use `--format supabase` for byte-for-byte Supabase CLI output.
 - SupaLite format also includes `Constraints`/`Indexes`, `referencedSchema` in `Relationships`, `bigint` + `Json` bigint support, and `SetofOptions` for setof RPCs.
 - BIGINT type mapping is controlled by `--bigint-type bigint|number|string` (default: supabase=number, supalite=bigint)
+- `--no-bigint` is a shortcut for `--bigint-type number`
 - `--json-bigint` includes `bigint` in the `Json` union (default: supabase=false, supalite=true)
+- `--no-json-bigint` disables bigint in the `Json` union
 - `--date-as-date` maps `date`/`timestamp` columns to `Date`
 - `--include-relationships` emits foreign-key metadata into `Relationships` (default: true)
 - `--include-constraints` emits primary/unique/check/foreign key metadata (default: supabase=false, supalite=true)

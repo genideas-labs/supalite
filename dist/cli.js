@@ -13,6 +13,7 @@ const printUsage = () => {
   [--out supalite.types.ts] \\
   [--format supabase|supalite] \\
   [--bigint-type bigint|number|string] \\
+  [--no-bigint] \\
   [--json-bigint] \\
   [--no-json-bigint] \\
   [--date-as-date] \\
@@ -36,6 +37,7 @@ Defaults:
 - includeCompositeTypes: true
 - includeFunctionSignatures: true
 - bigintType: number (supabase), bigint (supalite)
+- noBigint: false
 - jsonBigint: false (supabase), true (supalite)
 - typeCase: preserve
 - functionCase: preserve
@@ -78,8 +80,8 @@ const parseArgs = (args) => {
         jsonBigint: undefined,
         dateAsDate: false,
         includeRelationships: undefined,
-        includeConstraints: false,
-        includeIndexes: false,
+        includeConstraints: undefined,
+        includeIndexes: undefined,
         includeCompositeTypes: undefined,
         includeFunctionSignatures: undefined,
         dumpFunctionsSql: false,
@@ -119,6 +121,10 @@ const parseArgs = (args) => {
         if (arg === '--bigint-type') {
             result.bigintType = parseBigintType(args[i + 1]);
             i += 1;
+            continue;
+        }
+        if (arg === '--no-bigint') {
+            result.bigintType = 'number';
             continue;
         }
         if (arg === '--json-bigint') {

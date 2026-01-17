@@ -257,7 +257,9 @@ npx supalite gen types --db-url "postgresql://user:pass@localhost:5432/db" --sch
 - 기본 출력은 SupaLite 포맷(= Supabase CLI의 상위 집합)입니다. Supabase CLI와 1:1로 맞추려면 `--format supabase`를 사용하세요.
 - SupaLite 포맷은 `Constraints`/`Indexes`, `Relationships`의 `referencedSchema`, `bigint` + `Json` bigint 지원, setof RPC용 `SetofOptions`를 추가로 포함합니다.
 - BIGINT 컬럼 타입은 `--bigint-type bigint|number|string`로 제어합니다. (기본: supabase=number, supalite=bigint)
+- `--no-bigint`는 `--bigint-type number`의 간편 옵션입니다.
 - `--json-bigint`는 `Json` 타입에 `bigint`를 포함합니다. (기본: supabase=false, supalite=true)
+- `--no-json-bigint`는 `Json` 타입에서 `bigint`를 제외합니다.
 - `--date-as-date`는 `date`/`timestamp` 컬럼을 `Date`로 생성합니다.
 - `--include-relationships`는 FK 메타데이터를 `Relationships`에 포함합니다. (기본: true)
 - `--include-constraints`는 PK/UNIQUE/CHECK/FK 메타데이터를 포함합니다. (기본: supabase=false, supalite=true)

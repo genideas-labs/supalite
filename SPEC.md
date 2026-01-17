@@ -158,7 +158,8 @@ Notes:
 - `--format supalite|supabase` (default: supalite).
 - `--format supabase` matches Supabase CLI output (including formatting).
 - SupaLite format is a superset of Supabase: `Constraints`/`Indexes`, `referencedSchema` in `Relationships`, `bigint` defaults, `Json` bigint, and `SetofOptions` for setof RPCs.
-- `BIGINT` maps to `bigint` by default (`--format supabase` defaults to `number`); `json/jsonb` map to `Json`.
+- `BIGINT` maps to `bigint` by default (`--format supabase` defaults to `number`); `--no-bigint` is a shorthand for `--bigint-type number`.
+- `json/jsonb` map to `Json` with optional `bigint` (`--json-bigint` default: supalite=true, supabase=false; disable via `--no-json-bigint`).
 - `--date-as-date` maps `date`/`timestamp` columns to `Date`.
 - `--include-relationships` emits FK metadata in `Relationships`.
 - `--include-constraints` emits PK/UNIQUE/CHECK/FK metadata per table.
