@@ -22,6 +22,12 @@ Compatibility at a glance:
 - ✅ RPC (including `single`/`maybeSingle`)
 - ❌ Auth/Storage/Realtime
 
+## 0.7.2 Highlights
+
+- `supalite gen types --format supabase` now matches Supabase CLI output byte-for-byte (ordering + formatting).
+- Default `--format supalite` is a superset with extra schema metadata (constraints/indexes, referenced schema in relationships, set-returning RPC options).
+- New BigInt controls for generated types: `--no-bigint` and `--no-json-bigint`.
+
 Cloud migration note (GCP/AWS):
 If you are moving off Supabase, SupaLite replaces only the **DB query layer**. You still need alternatives for Auth/Storage/Realtime. Typical choices are:
 - Auth: managed identity (AWS Cognito / Google Identity Platform) or self-hosted (GoTrue/Keycloak)

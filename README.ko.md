@@ -21,6 +21,12 @@ Supabase 쿼리 빌더에 집중한 가벼운 PostgreSQL 클라이언트입니�
 - ✅ RPC (`single`/`maybeSingle` 포함)
 - ❌ Auth/Storage/Realtime
 
+## 0.7.2 하이라이트
+
+- `supalite gen types --format supabase`가 Supabase CLI 출력과 바이트까지 완전히 일치합니다. (정렬/포맷 포함)
+- 기본값인 `--format supalite`는 Supabase 포맷을 확장한 상위 호환 출력으로, 제약/인덱스, 관계의 `referencedSchema`, SETOF 반환 RPC 옵션을 제공합니다.
+- 타입 생성 BigInt 옵션을 추가했습니다: `--no-bigint`, `--no-json-bigint`.
+
 클라우드 마이그레이션 안내 (GCP/AWS):
 Supabase에서 완전히 분리하려면 SupaLite는 **DB 쿼리 계층만** 대체합니다. Auth/Storage/Realtime은 별도 대안이 필요합니다.
 - Auth: 관리형 인증(AWS Cognito / Google Identity Platform) 또는 자체 호스팅(GoTrue/Keycloak)
