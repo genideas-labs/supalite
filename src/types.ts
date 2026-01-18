@@ -1,3 +1,4 @@
+import type { Pool } from 'pg';
 import { PostgresError } from './errors';
 
 export type Json =
@@ -89,6 +90,7 @@ export type EnumType<
 export type BigintTransformType = 'bigint' | 'string' | 'number';
 
 export interface SupaliteConfig {
+  pool?: Pool; // 외부 Pool 주입 시 SupaLite는 pool 생성/종료를 하지 않음
   connectionString?: string; // 연결 문자열(URI) 지원
   bigintTransform?: BigintTransformType; // BIGINT 변환 방식
   user?: string;

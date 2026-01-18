@@ -13,6 +13,7 @@ SupaLite is a lightweight TypeScript PostgreSQL client that mirrors a subset of 
 
 #### Construction
 - Accepts either `connectionString` or discrete connection params.
+- Optional `pool` lets callers inject an existing `pg` Pool (SupaLite does not create or close the pool).
 - Env vars supported: `DB_CONNECTION`, `DB_USER`, `DB_HOST`, `DB_NAME`, `DB_PASS`, `DB_PORT`, `DB_SSL`.
 - `bigintTransform`: `'bigint' | 'string' | 'number'` controls how BIGINT values are parsed.
 - `verbose`: logs SQL, values, and warnings for risky bigint-to-number conversions.
@@ -40,7 +41,7 @@ Notes:
 
 ### 2.4 Utilities
 - `testConnection()` to validate connectivity.
-- `close()` to shut down the pool.
+- `close()` to shut down the internal pool (no-op when using an external `pool`).
 
 ## 3. Result Shapes
 

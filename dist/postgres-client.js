@@ -172,6 +172,7 @@ class SupaLitePG {
         this.schemaCache = new Map(); // schemaName.tableName -> Map<columnName, pgDataType>
         this.foreignKeyCache = new Map();
         this.verbose = false;
+        this.ownsPool = true;
         this.verbose = config?.verbose || process.env.SUPALITE_VERBOSE === 'true' || false;
         this.bigintTransform = config?.bigintTransform || 'bigint'; // 기본값 'bigint'
         if (this.verbose) {
@@ -199,44 +200,53 @@ class SupaLitePG {
                 pg_1.types.setTypeParser(20, (val) => val === null ? null : BigInt(val));
                 break;
         }
-        let poolConfigOptions = {};
-        // connectionString이 제공되면 이를 우선 사용
-        if (config?.connectionString || process.env.DB_CONNECTION) {
-            try {
-                const connectionString = config?.connectionString || process.env.DB_CONNECTION || '';
-                if (!connectionString.startsWith('postgresql://')) {
-                    throw new Error('Invalid PostgreSQL connection string format. Must start with postgresql://');
-                }
-                poolConfigOptions.connectionString = connectionString;
-                poolConfigOptions.ssl = config?.ssl !== undefined ? config.ssl : process.env.DB_SSL === 'true';
-                if (this.verbose) {
-                    console.log('[SupaLite VERBOSE] Database connection using connection string');
-                }
-            }
-            catch (err) {
-                console.error('[SupaLite ERROR] Database connection error:', err.message);
-                throw new Error(`Failed to establish database connection: ${err.message}`);
+        this.schema = config?.schema || 'public';
+        if (config?.pool) {
+            this.pool = config.pool;
+            this.ownsPool = false;
+            if (this.verbose) {
+                console.log('[SupaLite VERBOSE] Using external Pool instance');
             }
         }
         else {
-            // 기존 코드: 개별 매개변수 사용
-            poolConfigOptions = {
-                user: config?.user || process.env.DB_USER,
-                host: config?.host || process.env.DB_HOST,
-                database: config?.database || process.env.DB_NAME,
-                password: config?.password || process.env.DB_PASS,
-                port: config?.port || Number(process.env.DB_PORT) || 5432,
-                ssl: config?.ssl !== undefined ? config.ssl : process.env.DB_SSL === 'true', // ssl 설정 명시적 처리
-            };
-            if (this.verbose) {
-                console.log('[SupaLite VERBOSE] Database connection using individual parameters:', {
-                    ...poolConfigOptions,
-                    password: '********'
-                });
+            let poolConfigOptions = {};
+            // connectionString이 제공되면 이를 우선 사용
+            if (config?.connectionString || process.env.DB_CONNECTION) {
+                try {
+                    const connectionString = config?.connectionString || process.env.DB_CONNECTION || '';
+                    if (!connectionString.startsWith('postgresql://')) {
+                        throw new Error('Invalid PostgreSQL connection string format. Must start with postgresql://');
+                    }
+                    poolConfigOptions.connectionString = connectionString;
+                    poolConfigOptions.ssl = config?.ssl !== undefined ? config.ssl : process.env.DB_SSL === 'true';
+                    if (this.verbose) {
+                        console.log('[SupaLite VERBOSE] Database connection using connection string');
+                    }
+                }
+                catch (err) {
+                    console.error('[SupaLite ERROR] Database connection error:', err.message);
+                    throw new Error(`Failed to establish database connection: ${err.message}`);
+                }
             }
+            else {
+                // 기존 코드: 개별 매개변수 사용
+                poolConfigOptions = {
+                    user: config?.user || process.env.DB_USER,
+                    host: config?.host || process.env.DB_HOST,
+                    database: config?.database || process.env.DB_NAME,
+                    password: config?.password || process.env.DB_PASS,
+                    port: config?.port || Number(process.env.DB_PORT) || 5432,
+                    ssl: config?.ssl !== undefined ? config.ssl : process.env.DB_SSL === 'true', // ssl 설정 명시적 처리
+                };
+                if (this.verbose) {
+                    console.log('[SupaLite VERBOSE] Database connection using individual parameters:', {
+                        ...poolConfigOptions,
+                        password: '********'
+                    });
+                }
+            }
+            this.pool = new pg_1.Pool(poolConfigOptions);
         }
-        this.pool = new pg_1.Pool(poolConfigOptions);
-        this.schema = config?.schema || 'public';
         // Error handling
         this.pool.on('error', (err) => {
             console.error('[SupaLite ERROR] Unexpected error on idle client', err);
@@ -415,6 +425,9 @@ class SupaLitePG {
         }
     }
     async close() {
+        if (!this.ownsPool) {
+            return;
+        }
         await this.pool.end();
     }
 }

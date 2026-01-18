@@ -54,6 +54,7 @@ export declare class SupaLitePG<T extends {
     private foreignKeyCache;
     verbose: boolean;
     private bigintTransform;
+    private ownsPool;
     constructor(config?: SupaliteConfig);
     begin(): Promise<void>;
     commit(): Promise<void>;

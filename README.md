@@ -314,6 +314,21 @@ const client = new SupaliteClient<Database>({
 });
 ```
 
+```typescript
+import { Pool } from 'pg';
+import { SupaLitePG } from 'supalite';
+import { Database } from './types/database';
+
+const pool = new Pool({
+  connectionString: process.env.DB_CONNECTION || 'postgresql://user:pass@localhost:5432/db',
+  max: 5,
+});
+
+const client = new SupaLitePG<Database>({
+  pool,
+});
+```
+
 ### Basic CRUD
 
 ```typescript
@@ -1054,6 +1069,7 @@ DB_SSL=true
 
 ### SupaLitePG constructor options
 
+- `pool?: Pool`: use an external `pg` Pool instance (other connection options are ignored; pool lifecycle is managed by the caller)
 - `connectionString?: string`: connection string (e.g. `postgresql://user:password@host:port/database`)
 - `user?: string`: DB user (env: `DB_USER`)
 - `host?: string`: DB host (env: `DB_HOST`)

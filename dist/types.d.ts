@@ -1,3 +1,4 @@
+import type { Pool } from 'pg';
 import { PostgresError } from './errors';
 export type Json = string | number | bigint | boolean | null | {
     [key: string]: Json | undefined;
@@ -46,6 +47,7 @@ export type UpdateRow<T extends DatabaseSchema, S extends SchemaName<T>, K exten
 export type EnumType<T extends DatabaseSchema, S extends SchemaName<T>, E extends keyof NonNullable<T[S]['Enums']>> = NonNullable<T[S]['Enums']>[E];
 export type BigintTransformType = 'bigint' | 'string' | 'number';
 export interface SupaliteConfig {
+    pool?: Pool;
     connectionString?: string;
     bigintTransform?: BigintTransformType;
     user?: string;

@@ -314,6 +314,21 @@ const client = new SupaliteClient<Database>({
 });
 ```
 
+```typescript
+import { Pool } from 'pg';
+import { SupaLitePG } from 'supalite';
+import { Database } from './types/database';
+
+const pool = new Pool({
+  connectionString: process.env.DB_CONNECTION || 'postgresql://user:pass@localhost:5432/db',
+  max: 5,
+});
+
+const client = new SupaLitePG<Database>({
+  pool,
+});
+```
+
 ### 기본 CRUD 작업
 
 ```typescript
@@ -1038,7 +1053,7 @@ await client.close();
 ### 클라이언트 메소드
 
 - `testConnection()`: 데이터베이스 연결 확인
-- `close()`: 커넥션 풀 종료
+- `close()`: 내부 커넥션 풀 종료 (외부 `pool` 사용 시 no-op)
 
 ## 환경 변수 설정
 
@@ -1058,6 +1073,7 @@ DB_SSL=true
 
 `SupaLitePG` 생성자는 다음 옵션을 받을 수 있습니다:
 
+- `pool?: Pool`: 외부 `pg` Pool 인스턴스를 사용합니다. 이 경우 다른 연결 옵션은 무시되고, 풀의 생성/종료는 호출자가 관리합니다.
 - `connectionString?: string`: PostgreSQL 연결 문자열 (예: `postgresql://user:password@host:port/database`). 제공되면 다른 연결 매개변수보다 우선합니다.
 - `user?: string`: 데이터베이스 사용자 이름 (환경 변수: `DB_USER`).
 - `host?: string`: 데이터베이스 호스트 (환경 변수: `DB_HOST`).
