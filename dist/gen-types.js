@@ -590,7 +590,7 @@ const renderIndexesProperty = (indexes, level, style) => {
     const items = indexes.map((index) => [
         `name: ${style.quote}${escapeStringLiteral(index.name, style.quote)}${style.quote}`,
         `isUnique: ${index.isUnique ? 'true' : 'false'}`,
-        `definition: ${style.quote}${escapeStringLiteral(index.definition, style.quote)}${style.quote}`,
+        `definition: ${style.quote}${escapeStringLiteral(index.definition ?? '', style.quote)}${style.quote}`,
     ]);
     return renderObjectArrayProperty('Indexes', items, level, style);
 };
