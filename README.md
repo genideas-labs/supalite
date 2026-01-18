@@ -818,7 +818,7 @@ Empty array `insert([])` throws `Empty array provided for insert`.
 ### Data Types (JSONB/Arrays/BigInt)
 
 ```typescript
-// JSONB (auto stringify for arrays/objects)
+// JSONB (auto stringify for arrays/objects; BigInt values inside JSON become strings)
 await client
   .from('jsonb_test_table')
   .insert({ jsonb_data: ['string', 123, { nested: true }], another_json_field: { key: 'value' } })
@@ -1085,7 +1085,7 @@ DB_SSL=true
   - `'number'`: returns `Number` (may lose precision, warns if unsafe)
 
 ### Json type and BigInt
-The internal `Json` type includes `bigint` to allow explicit BigInt usage in TypeScript. However, standard `JSON.stringify()` cannot handle native `BigInt` and will throw. Use a custom replacer or pre-convert values, or set `bigintTransform` to `'string'` or `'number'` for JSON-safe results.
+The internal `Json` type includes `bigint` to allow explicit BigInt usage in TypeScript. When inserting or updating JSON/JSONB columns, SupaLite stringifies arrays/objects and converts any BigInt values to strings to avoid `JSON.stringify()` errors. If you need numeric JSON values, convert BigInt to `Number` yourself (mind precision). Standard `JSON.stringify()` still cannot handle native `BigInt` in userland; use a custom replacer if you serialize objects yourself.
 
 ## Response format
 

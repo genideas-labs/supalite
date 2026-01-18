@@ -4,7 +4,7 @@ import { PostgresError } from './errors';
 export type Json =
   | string
   | number
-  | bigint  // BigInt 타입 추가. JSON.stringify 시 사용자 처리 필요.
+  | bigint  // JSON/JSONB 입력 시 bigint는 문자열로 직렬화됨.
   | boolean
   | null
   | { [key: string]: Json | undefined }

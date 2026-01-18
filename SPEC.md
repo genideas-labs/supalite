@@ -118,7 +118,7 @@ Notes:
 
 ## 5. Data Conversion Rules
 - JSON/JSONB on INSERT/UPDATE:
-  - Arrays and plain objects are `JSON.stringify`'d.
+  - Arrays and plain objects are `JSON.stringify`'d, with BigInt values converted to strings.
   - Dates and primitives are passed through.
 - Native arrays (e.g. `text[]`) are passed through as JavaScript arrays.
 - BIGINT parsing:

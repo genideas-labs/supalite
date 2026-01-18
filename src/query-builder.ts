@@ -712,6 +712,15 @@ export class QueryBuilder<
     return this.selectColumns !== null;
   }
 
+  private stringifyJsonValue(value: unknown): string {
+    return JSON.stringify(value, (_key, val) => {
+      if (typeof val === 'bigint') {
+        return val.toString();
+      }
+      return val;
+    });
+  }
+
   private buildWhereClause(updateValues?: any[], conditionsOverride?: string[]): string {
     const baseConditions = conditionsOverride ? [...conditionsOverride] : [...this.whereConditions];
 
@@ -803,7 +812,7 @@ export class QueryBuilder<
                 rowValues.push(val.toString());
               } else if ((pgType === 'json' || pgType === 'jsonb') && 
                          (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date)))) {
-                rowValues.push(JSON.stringify(val));
+                rowValues.push(this.stringifyJsonValue(val));
               } else {
                 rowValues.push(val);
               }
@@ -828,7 +837,7 @@ export class QueryBuilder<
             }
             if ((pgType === 'json' || pgType === 'jsonb') && 
                 (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date)))) {
-              return JSON.stringify(val);
+              return this.stringifyJsonValue(val);
             }
             return val;
           });
@@ -887,7 +896,7 @@ export class QueryBuilder<
           }
           if ((pgType === 'json' || pgType === 'jsonb') && 
               (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date)))) {
-            return JSON.stringify(val);
+            return this.stringifyJsonValue(val);
           }
           return val;
         });

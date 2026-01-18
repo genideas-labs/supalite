@@ -818,7 +818,7 @@ await client
 ### 데이터 타입 (JSONB/배열/BigInt)
 
 ```typescript
-// JSONB (배열/객체 자동 stringify)
+// JSONB (배열/객체 자동 stringify, JSON 내부 BigInt는 문자열로 직렬화)
 await client
   .from('jsonb_test_table')
   .insert({ jsonb_data: ['string', 123, { nested: true }], another_json_field: { key: 'value' } })
@@ -1085,12 +1085,12 @@ DB_SSL=true
 - `verbose?: boolean`: 상세 로그 출력 여부 (기본값: `false`, 환경 변수: `SUPALITE_VERBOSE`).
 - `bigintTransform?: 'bigint' | 'string' | 'number'`:
     - 데이터베이스의 `BIGINT` 타입을 어떻게 변환할지 지정합니다.
-    - `'bigint'` (기본값): JavaScript의 네이티브 `BigInt` 객체로 변환합니다. 이 라이브러리의 `Json` 타입은 `bigint`를 포함할 수 있도록 정의되어 있으나, 표준 `JSON.stringify()` 함수는 `BigInt`를 직접 처리하지 못하므로 `TypeError`가 발생할 수 있습니다. `BigInt` 값을 JSON으로 직렬화하려면 사용자 정의 replacer 함수를 사용하거나 사전에 문자열 등으로 변환해야 합니다.
+    - `'bigint'` (기본값): JavaScript의 네이티브 `BigInt` 객체로 변환합니다. 이 라이브러리의 `Json` 타입은 `bigint`를 포함할 수 있도록 정의되어 있으나, 표준 `JSON.stringify()` 함수는 `BigInt`를 직접 처리하지 못하므로 `TypeError`가 발생할 수 있습니다. `BigInt` 값을 JSON으로 직렬화하려면 사용자 정의 replacer 함수를 사용하거나 사전에 문자열 등으로 변환해야 합니다. JSON/JSONB 입력에서는 `BigInt`를 문자열로 직렬화합니다.
     - `'string'`: 문자열로 변환합니다. JSON 직렬화에 안전하며, `BigInt`의 전체 정밀도를 유지합니다.
     - `'number'`: JavaScript의 `Number` 타입으로 변환합니다. 값이 `Number.MAX_SAFE_INTEGER` (또는 `Number.MIN_SAFE_INTEGER`)를 초과하면 정밀도 손실이 발생할 수 있습니다. 이 경우 `verbose: true` 설정 시 경고 로그가 출력됩니다. JSON 직렬화에는 안전합니다.
 
 ### Json 타입과 BigInt
-라이브러리의 내부 `Json` 타입 정의는 `bigint`를 포함하여 TypeScript 코드 내에서 `BigInt` 값을 명시적으로 다룰 수 있도록 합니다. 그러나 `Json` 타입의 데이터를 표준 `JSON.stringify()`로 직렬화할 때, 포함된 `BigInt` 객체는 특별한 처리(예: 사용자 정의 replacer 함수 또는 사전 문자열 변환)가 필요합니다. `bigintTransform` 옵션을 `'string'` 또는 `'number'`로 설정하면 데이터베이스 조회 시점부터 JSON 직렬화에 안전한 형태로 `BIGINT` 값을 받을 수 있습니다.
+라이브러리의 내부 `Json` 타입 정의는 `bigint`를 포함하여 TypeScript 코드 내에서 `BigInt` 값을 명시적으로 다룰 수 있도록 합니다. JSON/JSONB 컬럼에 INSERT/UPDATE 할 때는 배열/객체를 stringify하며, 이 과정에서 `BigInt` 값은 문자열로 변환되어 직렬화됩니다. 숫자 JSON이 필요하면 `BigInt`를 `Number`로 변환해 전달하세요(정밀도 주의). 표준 `JSON.stringify()`는 여전히 `BigInt`를 직접 처리하지 못하므로, 사용자 코드에서 직접 직렬화할 때는 replacer가 필요합니다. `bigintTransform` 옵션을 `'string'` 또는 `'number'`로 설정하면 데이터베이스 조회 시점부터 JSON 직렬화에 안전한 형태로 `BIGINT` 값을 받을 수 있습니다.
 
 ## 응답 형식
 
