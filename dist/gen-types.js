@@ -1405,18 +1405,41 @@ const generateTypes = async (options) => {
             });
         }
         if (includeIndexes) {
-            const { rows: indexRows } = await client.query(`SELECT n.nspname AS schema,
-                t.relname AS table,
-                i.relname AS name,
-                ix.indisunique AS "isUnique",
-                pg_get_indexdef(ix.indexrelid) AS definition
-         FROM pg_class t
-         JOIN pg_namespace n ON n.oid = t.relnamespace
-         JOIN pg_index ix ON t.oid = ix.indrelid
-         JOIN pg_class i ON i.oid = ix.indexrelid
-         WHERE n.nspname = ANY($1)
-           AND t.relkind = 'r'
-         ORDER BY n.nspname, t.relname, i.relname`, [schemas]);
+            let indexRows = [];
+            try {
+                const { rows } = await client.query(`SELECT n.nspname AS schema,
+                  t.relname AS table,
+                  i.relname AS name,
+                  ix.indisunique AS "isUnique",
+                  pg_get_indexdef(ix.indexrelid) AS definition
+           FROM pg_class t
+           JOIN pg_namespace n ON n.oid = t.relnamespace
+           JOIN pg_index ix ON t.oid = ix.indrelid
+           JOIN pg_class i ON i.oid = ix.indexrelid
+           WHERE n.nspname = ANY($1)
+             AND t.relkind = 'r'
+           ORDER BY n.nspname, t.relname, i.relname`, [schemas]);
+                indexRows = rows;
+            }
+            catch (err) {
+                const message = String(err?.message ?? '');
+                if (!message.includes('could not open relation')) {
+                    throw err;
+                }
+                const { rows } = await client.query(`SELECT n.nspname AS schema,
+                  t.relname AS table,
+                  i.relname AS name,
+                  ix.indisunique AS "isUnique",
+                  NULL::text AS definition
+           FROM pg_class t
+           JOIN pg_namespace n ON n.oid = t.relnamespace
+           JOIN pg_index ix ON t.oid = ix.indrelid
+           JOIN pg_class i ON i.oid = ix.indexrelid
+           WHERE n.nspname = ANY($1)
+             AND t.relkind = 'r'
+           ORDER BY n.nspname, t.relname, i.relname`, [schemas]);
+                indexRows = rows;
+            }
             indexRows.forEach((row) => {
                 const tableKey = `${row.schema}.${row.table}`;
                 const existing = indexesByTable.get(tableKey) ?? [];
