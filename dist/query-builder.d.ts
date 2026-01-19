@@ -78,6 +78,7 @@ export declare class QueryBuilder<T extends DatabaseSchema, S extends SchemaName
     private formatConflictTarget;
     private quoteConflictTargetColumn;
     private shouldReturnData;
+    private stringifyJsonValue;
     private buildWhereClause;
     private buildQuery;
     private parseExplainPlanRows;

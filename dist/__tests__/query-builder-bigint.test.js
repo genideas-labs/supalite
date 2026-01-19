@@ -20,7 +20,10 @@ describe('QueryBuilder with BigInt Column', () => {
     `);
     });
     beforeEach(async () => {
-        client = new postgres_client_1.SupaLitePG({ connectionString });
+        client = new postgres_client_1.SupaLitePG({
+            connectionString,
+            bigintTransform: 'bigint'
+        });
         await pool.query('DELETE FROM bigint_test_table;');
         // Insert initial data using BigInt literals, ensuring they are passed as strings and are within PostgreSQL bigint range
         await pool.query(`

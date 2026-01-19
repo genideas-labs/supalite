@@ -15,6 +15,7 @@ jest.mock('pg', () => {
     return { Pool: jest.fn(() => mPool), types: mTypes };
 });
 const normalizeSql = (sql) => sql.replace(/\s+/g, ' ').trim();
+const stringifyJsonWithBigint = (value) => JSON.stringify(value, (_key, val) => (typeof val === 'bigint' ? val.toString() : val));
 describe('QueryBuilder raw SQL assertions', () => {
     let client;
     let pool;
@@ -282,11 +283,12 @@ describe('QueryBuilder raw SQL assertions', () => {
                 return 'jsonb';
             return 'text';
         });
+        const metadata = { ok: true, id: 987n };
         const qb = new query_builder_1.QueryBuilder(pool, client, 'sample', 'public')
-            .insert({ bigint_value: 123n, metadata: { ok: true }, name: 'hi' })
+            .insert({ bigint_value: 123n, metadata, name: 'hi' })
             .select();
         const { query, values } = await qb.buildQuery();
-        expect(values).toEqual(['123', JSON.stringify({ ok: true }), 'hi']);
+        expect(values).toEqual(['123', stringifyJsonWithBigint(metadata), 'hi']);
         expect(normalizeSql(query)).toBe('INSERT INTO "public"."sample" ("bigint_value","metadata","name") VALUES ($1,$2,$3) RETURNING *');
     });
     it('should stringify jsonb and bigint on update', async () => {
@@ -297,12 +299,13 @@ describe('QueryBuilder raw SQL assertions', () => {
                 return 'jsonb';
             return 'text';
         });
+        const metadata = ['a', 456n];
         const qb = new query_builder_1.QueryBuilder(pool, client, 'sample', 'public')
-            .update({ bigint_value: 456n, metadata: ['a'], name: 'hi' })
+            .update({ bigint_value: 456n, metadata, name: 'hi' })
             .eq('id', 1)
             .select();
         const { query, values } = await qb.buildQuery();
-        expect(values).toEqual(['456', JSON.stringify(['a']), 'hi', 1]);
+        expect(values).toEqual(['456', stringifyJsonWithBigint(metadata), 'hi', 1]);
         expect(normalizeSql(query)).toBe('UPDATE "public"."sample" SET "bigint_value" = $1, "metadata" = $2, "name" = $3 WHERE "id" = $4 RETURNING *');
     });
     it('should build UPDATE without RETURNING when select() is not called', async () => {

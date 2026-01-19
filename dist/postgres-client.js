@@ -8,6 +8,8 @@ const errors_1 = require("./errors");
 const dotenv_1 = require("dotenv");
 // .env 파일 로드
 (0, dotenv_1.config)();
+const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+const MIN_SAFE_BIGINT = BigInt(Number.MIN_SAFE_INTEGER);
 class RpcBuilder {
     constructor(pool, schema, procedureName, params = {}) {
         this.pool = pool;
@@ -174,7 +176,7 @@ class SupaLitePG {
         this.verbose = false;
         this.ownsPool = true;
         this.verbose = config?.verbose || process.env.SUPALITE_VERBOSE === 'true' || false;
-        this.bigintTransform = config?.bigintTransform || 'bigint'; // 기본값 'bigint'
+        this.bigintTransform = config?.bigintTransform || 'number-or-string'; // 기본값 'number-or-string'
         if (this.verbose) {
             console.log(`[SupaLite VERBOSE] BIGINT transform mode set to: '${this.bigintTransform}'`);
         }
@@ -193,6 +195,21 @@ class SupaLitePG {
                             `Max safe integer is ${Number.MAX_SAFE_INTEGER}.`);
                     }
                     return num;
+                });
+                break;
+            case 'number-or-string':
+                pg_1.types.setTypeParser(20, (val) => {
+                    if (val === null)
+                        return null;
+                    const bigValue = BigInt(val);
+                    if (bigValue > MAX_SAFE_BIGINT || bigValue < MIN_SAFE_BIGINT) {
+                        if (this.verbose) {
+                            console.warn(`[SupaLite VERBOSE WARNING] BIGINT value ${val} exceeds safe integer range; ` +
+                                'returning string to preserve precision.');
+                        }
+                        return val;
+                    }
+                    return Number(val);
                 });
                 break;
             case 'bigint':

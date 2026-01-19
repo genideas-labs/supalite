@@ -574,6 +574,14 @@ class QueryBuilder {
     shouldReturnData() {
         return this.selectColumns !== null;
     }
+    stringifyJsonValue(value) {
+        return JSON.stringify(value, (_key, val) => {
+            if (typeof val === 'bigint') {
+                return val.toString();
+            }
+            return val;
+        });
+    }
     buildWhereClause(updateValues, conditionsOverride) {
         const baseConditions = conditionsOverride ? [...conditionsOverride] : [...this.whereConditions];
         if (baseConditions.length === 0 && this.orConditions.length === 0) {
@@ -648,7 +656,7 @@ class QueryBuilder {
                             }
                             else if ((pgType === 'json' || pgType === 'jsonb') &&
                                 (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date)))) {
-                                rowValues.push(JSON.stringify(val));
+                                rowValues.push(this.stringifyJsonValue(val));
                             }
                             else {
                                 rowValues.push(val);
@@ -672,7 +680,7 @@ class QueryBuilder {
                         }
                         if ((pgType === 'json' || pgType === 'jsonb') &&
                             (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date)))) {
-                            return JSON.stringify(val);
+                            return this.stringifyJsonValue(val);
                         }
                         return val;
                     });
@@ -726,7 +734,7 @@ class QueryBuilder {
                     }
                     if ((pgType === 'json' || pgType === 'jsonb') &&
                         (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date)))) {
-                        return JSON.stringify(val);
+                        return this.stringifyJsonValue(val);
                     }
                     return val;
                 });
