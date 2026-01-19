@@ -7,6 +7,9 @@ import { config as dotenvConfig } from 'dotenv';
 // .env 파일 로드
 dotenvConfig();
 
+const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+const MIN_SAFE_BIGINT = BigInt(Number.MIN_SAFE_INTEGER);
+
 // 타입 파서 설정은 생성자 내부로 이동
 
 type SchemaWithTables = {
@@ -229,7 +232,7 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
 
   constructor(config?: SupaliteConfig) {
     this.verbose = config?.verbose || process.env.SUPALITE_VERBOSE === 'true' || false;
-    this.bigintTransform = config?.bigintTransform || 'bigint'; // 기본값 'bigint'
+    this.bigintTransform = config?.bigintTransform || 'number-or-string'; // 기본값 'number-or-string'
 
     if (this.verbose) {
       console.log(`[SupaLite VERBOSE] BIGINT transform mode set to: '${this.bigintTransform}'`);
@@ -251,6 +254,22 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
             );
           }
           return num;
+        });
+        break;
+      case 'number-or-string':
+        types.setTypeParser(20, (val: string | null) => {
+          if (val === null) return null;
+          const bigValue = BigInt(val);
+          if (bigValue > MAX_SAFE_BIGINT || bigValue < MIN_SAFE_BIGINT) {
+            if (this.verbose) {
+              console.warn(
+                `[SupaLite VERBOSE WARNING] BIGINT value ${val} exceeds safe integer range; ` +
+                'returning string to preserve precision.'
+              );
+            }
+            return val;
+          }
+          return Number(val);
         });
         break;
       case 'bigint':

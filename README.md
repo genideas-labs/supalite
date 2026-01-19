@@ -205,7 +205,7 @@ const client = new SupaLitePG<Database>({
   database: 'testdb',
   port: 5432,
   ssl: false,
-  // bigintTransform: 'string', // receive BIGINT as string (default: 'bigint')
+  // bigintTransform: 'number-or-string', // numbers when safe, strings otherwise (default: 'number-or-string')
   // verbose: true // verbose logging
 });
 
@@ -299,7 +299,7 @@ const client = new SupaLitePG<Database>({
   database: 'testdb',
   port: 5432,
   ssl: false,
-  // bigintTransform: 'string',
+  // bigintTransform: 'number-or-string', // default: 'number-or-string'
   // verbose: true
 });
 ```
@@ -1079,13 +1079,14 @@ DB_SSL=true
 - `ssl?: boolean`: SSL (default: `false`, env: `DB_SSL`)
 - `schema?: string`: default schema (default: `public`)
 - `verbose?: boolean`: verbose logging (default: `false`, env: `SUPALITE_VERBOSE`)
-- `bigintTransform?: 'bigint' | 'string' | 'number'`:
-  - `'bigint'` (default): uses native `BigInt`
+- `bigintTransform?: 'bigint' | 'string' | 'number' | 'number-or-string'`:
+  - `'bigint'`: uses native `BigInt`
   - `'string'`: returns string values (safe for JSON)
   - `'number'`: returns `Number` (may lose precision, warns if unsafe)
+  - `'number-or-string'` (default): returns `Number` when safe; otherwise keeps the string to preserve precision
 
 ### Json type and BigInt
-The internal `Json` type includes `bigint` to allow explicit BigInt usage in TypeScript. When inserting or updating JSON/JSONB columns, SupaLite stringifies arrays/objects and converts any BigInt values to strings to avoid `JSON.stringify()` errors. If you need numeric JSON values, convert BigInt to `Number` yourself (mind precision). Standard `JSON.stringify()` still cannot handle native `BigInt` in userland; use a custom replacer if you serialize objects yourself.
+The internal `Json` type includes `bigint` to allow explicit BigInt usage in TypeScript. When inserting or updating JSON/JSONB columns, SupaLite stringifies arrays/objects and converts any BigInt values to strings to avoid `JSON.stringify()` errors. If you need numeric JSON values, convert BigInt to `Number` yourself (mind precision). Standard `JSON.stringify()` still cannot handle native `BigInt` in userland; use a custom replacer if you serialize objects yourself. For JSON-safe query results without precision loss, use `bigintTransform: 'number-or-string'` so only safe values become numbers.
 
 ## Response format
 

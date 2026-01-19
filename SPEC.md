@@ -15,7 +15,7 @@ SupaLite is a lightweight TypeScript PostgreSQL client that mirrors a subset of 
 - Accepts either `connectionString` or discrete connection params.
 - Optional `pool` lets callers inject an existing `pg` Pool (SupaLite does not create or close the pool).
 - Env vars supported: `DB_CONNECTION`, `DB_USER`, `DB_HOST`, `DB_NAME`, `DB_PASS`, `DB_PORT`, `DB_SSL`.
-- `bigintTransform`: `'bigint' | 'string' | 'number'` controls how BIGINT values are parsed.
+- `bigintTransform`: `'bigint' | 'string' | 'number' | 'number-or-string'` controls how BIGINT values are parsed.
 - `verbose`: logs SQL, values, and warnings for risky bigint-to-number conversions.
 
 ### 2.2 QueryBuilder
@@ -121,10 +121,11 @@ Notes:
   - Arrays and plain objects are `JSON.stringify`'d, with BigInt values converted to strings.
   - Dates and primitives are passed through.
 - Native arrays (e.g. `text[]`) are passed through as JavaScript arrays.
-- BIGINT parsing:
+- BIGINT parsing (default: 'number-or-string'):
   - `'bigint'`: `BigInt` values.
   - `'string'`: string values.
   - `'number'`: `Number` with precision warning if unsafe.
+  - `'number-or-string'`: `Number` when safe, otherwise string to preserve precision.
 
 ## 6. Transactions
 - `begin`, `commit`, `rollback`, and `transaction` are implemented on `SupaLitePG`.

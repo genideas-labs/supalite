@@ -87,7 +87,7 @@ export type EnumType<
   E extends keyof NonNullable<T[S]['Enums']>
 > = NonNullable<T[S]['Enums']>[E];
 
-export type BigintTransformType = 'bigint' | 'string' | 'number';
+export type BigintTransformType = 'bigint' | 'string' | 'number' | 'number-or-string';
 
 export interface SupaliteConfig {
   pool?: Pool; // 외부 Pool 주입 시 SupaLite는 pool 생성/종료를 하지 않음
