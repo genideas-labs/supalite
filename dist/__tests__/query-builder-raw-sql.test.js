@@ -200,6 +200,14 @@ describe('QueryBuilder raw SQL assertions', () => {
         expect(values).toEqual(['Alice', 'active']);
         expect(normalizeSql(query)).toBe('INSERT INTO "public"."users" ("name","status") VALUES ($1,$2)');
     });
+    it('should omit undefined fields on insert', async () => {
+        setColumnTypes({});
+        const qb = new query_builder_1.QueryBuilder(pool, client, 'users', 'public')
+            .insert({ name: 'Alice', status: undefined, age: 30 });
+        const { query, values } = await qb.buildQuery();
+        expect(values).toEqual(['Alice', 30]);
+        expect(normalizeSql(query)).toBe('INSERT INTO "public"."users" ("name","age") VALUES ($1,$2)');
+    });
     it('should build INSERT with RETURNING when select() is called', async () => {
         setColumnTypes({});
         const qb = new query_builder_1.QueryBuilder(pool, client, 'users', 'public')
@@ -219,6 +227,17 @@ describe('QueryBuilder raw SQL assertions', () => {
         const { query, values } = await qb.buildQuery();
         expect(values).toEqual(['Alice', 'active', 'Bob', 'inactive']);
         expect(normalizeSql(query)).toBe('INSERT INTO "public"."users" ("name","status") VALUES ($1,$2),($3,$4)');
+    });
+    it('should emit DEFAULT for undefined fields on multi-row insert', async () => {
+        setColumnTypes({});
+        const qb = new query_builder_1.QueryBuilder(pool, client, 'users', 'public')
+            .insert([
+            { name: 'Alice', status: 'active' },
+            { name: 'Bob', status: undefined, age: 20 },
+        ]);
+        const { query, values } = await qb.buildQuery();
+        expect(values).toEqual(['Alice', 'active', 'Bob', 20]);
+        expect(normalizeSql(query)).toBe('INSERT INTO "public"."users" ("name","status","age") VALUES ($1,$2,DEFAULT),($3,DEFAULT,$4)');
     });
     it('should build INSERT with ignoreDuplicates as DO NOTHING', async () => {
         setColumnTypes({});
@@ -240,6 +259,15 @@ describe('QueryBuilder raw SQL assertions', () => {
         const { query, values } = await qb.buildQuery();
         expect(values).toEqual([1, 'Soup']);
         expect(normalizeSql(query)).toBe('INSERT INTO "public"."menu_item_opts_schema" ("set_id","name") VALUES ($1,$2) ON CONFLICT ("set_id", "name") DO UPDATE SET "set_id" = EXCLUDED."set_id", "name" = EXCLUDED."name" RETURNING *');
+    });
+    it('should omit undefined fields on upsert', async () => {
+        setColumnTypes({});
+        const qb = new query_builder_1.QueryBuilder(pool, client, 'users', 'public')
+            .upsert({ id: 1, status: undefined, name: 'Alice' }, { onConflict: 'id' })
+            .select();
+        const { query, values } = await qb.buildQuery();
+        expect(values).toEqual([1, 'Alice']);
+        expect(normalizeSql(query)).toBe('INSERT INTO "public"."users" ("id","name") VALUES ($1,$2) ON CONFLICT ("id") DO UPDATE SET "id" = EXCLUDED."id", "name" = EXCLUDED."name" RETURNING *');
     });
     it('should quote reserved columns in onConflict targets', async () => {
         setColumnTypes({});
@@ -316,6 +344,15 @@ describe('QueryBuilder raw SQL assertions', () => {
         const { query, values } = await qb.buildQuery();
         expect(values).toEqual(['active', 1]);
         expect(normalizeSql(query)).toBe('UPDATE "public"."users" SET "status" = $1 WHERE "id" = $2');
+    });
+    it('should omit undefined fields on update', async () => {
+        setColumnTypes({});
+        const qb = new query_builder_1.QueryBuilder(pool, client, 'users', 'public')
+            .update({ status: undefined, name: 'Alice' })
+            .eq('id', 1);
+        const { query, values } = await qb.buildQuery();
+        expect(values).toEqual(['Alice', 1]);
+        expect(normalizeSql(query)).toBe('UPDATE "public"."users" SET "name" = $1 WHERE "id" = $2');
     });
     it('should build UPDATE with IS NULL where clause', async () => {
         setColumnTypes({});

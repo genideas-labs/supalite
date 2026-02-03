@@ -582,6 +582,40 @@ class QueryBuilder {
             return val;
         });
     }
+    filterUndefinedEntries(data) {
+        const filtered = {};
+        for (const [key, value] of Object.entries(data)) {
+            if (value !== undefined) {
+                filtered[key] = value;
+            }
+        }
+        return filtered;
+    }
+    async normalizeColumnValue(column, value, pgTypeCache) {
+        if (typeof value === 'bigint') {
+            return value.toString();
+        }
+        let pgType;
+        if (pgTypeCache) {
+            if (pgTypeCache.has(column)) {
+                const cached = pgTypeCache.get(column);
+                pgType = cached || undefined;
+            }
+            else {
+                const fetched = await this.client.getColumnPgType(String(this.schema), String(this.table), column);
+                pgTypeCache.set(column, fetched ?? '');
+                pgType = fetched;
+            }
+        }
+        else {
+            pgType = await this.client.getColumnPgType(String(this.schema), String(this.table), column);
+        }
+        if ((pgType === 'json' || pgType === 'jsonb') &&
+            (Array.isArray(value) || (value !== null && typeof value === 'object' && !(value instanceof Date)))) {
+            return this.stringifyJsonValue(value);
+        }
+        return value;
+    }
     buildWhereClause(updateValues, conditionsOverride) {
         const baseConditions = conditionsOverride ? [...conditionsOverride] : [...this.whereConditions];
         if (baseConditions.length === 0 && this.orConditions.length === 0) {
@@ -645,48 +679,50 @@ class QueryBuilder {
                     const rows = this.insertData;
                     if (rows.length === 0)
                         throw new Error('Empty array provided for insert');
-                    insertColumns = Object.keys(rows[0]);
-                    const processedRowsValuesPromises = rows.map(async (row) => {
-                        const rowValues = [];
+                    const sanitizedRows = rows.map((row) => this.filterUndefinedEntries(row));
+                    insertColumns = [];
+                    for (const row of sanitizedRows) {
+                        for (const colName of Object.keys(row)) {
+                            if (!insertColumns.includes(colName)) {
+                                insertColumns.push(colName);
+                            }
+                        }
+                    }
+                    if (insertColumns.length === 0) {
+                        throw new Error('No data provided for insert/upsert');
+                    }
+                    const pgTypeCache = new Map();
+                    const rowPlaceholders = [];
+                    for (const row of sanitizedRows) {
+                        const placeholders = [];
                         for (const colName of insertColumns) { // Ensure order of values matches order of columns
                             const val = row[colName];
-                            const pgType = await this.client.getColumnPgType(String(this.schema), String(this.table), colName);
-                            if (typeof val === 'bigint') {
-                                rowValues.push(val.toString());
+                            if (val === undefined) {
+                                placeholders.push('DEFAULT');
+                                continue;
                             }
-                            else if ((pgType === 'json' || pgType === 'jsonb') &&
-                                (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date)))) {
-                                rowValues.push(this.stringifyJsonValue(val));
-                            }
-                            else {
-                                rowValues.push(val);
-                            }
+                            const normalizedValue = await this.normalizeColumnValue(colName, val, pgTypeCache);
+                            values.push(normalizedValue);
+                            placeholders.push(`$${values.length}`);
                         }
-                        return rowValues;
-                    });
-                    const processedRowsValuesArrays = await Promise.all(processedRowsValuesPromises);
-                    values = processedRowsValuesArrays.flat();
-                    const placeholders = rows.map((_, i) => `(${insertColumns.map((_, j) => `$${i * insertColumns.length + j + 1}`).join(',')})`).join(',');
-                    query = `INSERT INTO ${schemaTable} ("${insertColumns.join('","')}") VALUES ${placeholders}`;
+                        rowPlaceholders.push(`(${placeholders.join(',')})`);
+                    }
+                    query = `INSERT INTO ${schemaTable} ("${insertColumns.join('","')}") VALUES ${rowPlaceholders.join(',')}`;
                 }
                 else {
-                    const insertData = this.insertData;
+                    const insertData = this.filterUndefinedEntries(this.insertData);
                     insertColumns = Object.keys(insertData);
-                    const valuePromises = insertColumns.map(async (colName) => {
-                        const val = insertData[colName];
-                        const pgType = await this.client.getColumnPgType(String(this.schema), String(this.table), colName);
-                        if (typeof val === 'bigint') {
-                            return val.toString();
-                        }
-                        if ((pgType === 'json' || pgType === 'jsonb') &&
-                            (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date)))) {
-                            return this.stringifyJsonValue(val);
-                        }
-                        return val;
-                    });
-                    values = await Promise.all(valuePromises);
-                    const insertPlaceholders = values.map((_, i) => `$${i + 1}`).join(',');
-                    query = `INSERT INTO ${schemaTable} ("${insertColumns.join('","')}") VALUES (${insertPlaceholders})`;
+                    if (insertColumns.length === 0) {
+                        query = `INSERT INTO ${schemaTable} DEFAULT VALUES`;
+                    }
+                    else {
+                        const pgTypeCache = new Map();
+                        const valuePromises = insertColumns.map((colName) => // Iterate by column name to get pgType
+                         this.normalizeColumnValue(colName, insertData[colName], pgTypeCache));
+                        values = await Promise.all(valuePromises);
+                        const insertPlaceholders = values.map((_, i) => `$${i + 1}`).join(',');
+                        query = `INSERT INTO ${schemaTable} ("${insertColumns.join('","')}") VALUES (${insertPlaceholders})`;
+                    }
                 }
                 if ((this.queryType === 'UPSERT' || this.queryType === 'INSERT') && (this.conflictTarget || this.ignoreDuplicates)) {
                     const conflictTargetSQL = this.conflictTarget
@@ -696,6 +732,9 @@ class QueryBuilder {
                     const isUpsert = this.queryType === 'UPSERT';
                     if (!isUpsert && this.conflictTarget && !this.ignoreDuplicates) {
                         throw new Error('insert() only supports onConflict with ignoreDuplicates: true; use upsert() for updates.');
+                    }
+                    if (isUpsert && !this.ignoreDuplicates && insertColumns.length === 0) {
+                        throw new Error('upsert() requires at least one defined column to update.');
                     }
                     query += ' ON CONFLICT';
                     if (hasTarget) {
@@ -717,7 +756,10 @@ class QueryBuilder {
             case 'UPDATE': {
                 if (!this.updateData)
                     throw new Error('No data provided for update');
-                const updateData = { ...this.updateData };
+                const updateData = this.filterUndefinedEntries({ ...this.updateData });
+                if (Object.keys(updateData).length === 0) {
+                    throw new Error('No data provided for update');
+                }
                 const now = new Date().toISOString();
                 if ('modified_at' in updateData && !updateData.modified_at) {
                     updateData.modified_at = now;
@@ -726,17 +768,10 @@ class QueryBuilder {
                     updateData.updated_at = now;
                 }
                 const updateColumns = Object.keys(updateData);
+                const pgTypeCache = new Map();
                 const processedUpdateValuesPromises = updateColumns.map(async (colName) => {
                     const val = updateData[colName];
-                    const pgType = await this.client.getColumnPgType(String(this.schema), String(this.table), colName);
-                    if (typeof val === 'bigint') {
-                        return val.toString();
-                    }
-                    if ((pgType === 'json' || pgType === 'jsonb') &&
-                        (Array.isArray(val) || (val !== null && typeof val === 'object' && !(val instanceof Date)))) {
-                        return this.stringifyJsonValue(val);
-                    }
-                    return val;
+                    return this.normalizeColumnValue(colName, val, pgTypeCache);
                 });
                 const processedUpdateValues = await Promise.all(processedUpdateValuesPromises);
                 const setColumns = updateColumns.map((key, index) => `"${String(key)}" = $${index + 1}`);
