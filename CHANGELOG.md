@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1] - 2026-02-03
+
+### 🐞 Fixed
+- insert/update/upsert에서 `undefined` 필드를 제외하도록 수정했습니다.
+- multi-row insert에서 누락/undefined 값을 `DEFAULT`로 처리합니다.
+- 단일 insert에 정의된 필드가 없으면 `DEFAULT VALUES`를 사용합니다.
+
 ## [0.8.0] - 2026-01-19
 
 ### ✨ Added

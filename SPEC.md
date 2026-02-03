@@ -100,7 +100,10 @@ Notes:
 - `select()` appends `RETURNING` with the selected columns.
 - Without `select()`, no `RETURNING` is added.
 - `insert([])` throws `Empty array provided for insert`.
-- Multi-row inserts use the first row's keys as column order.
+- `undefined` fields are omitted from insert/update/upsert payloads.
+- Single-row inserts with no defined fields emit `DEFAULT VALUES`.
+- Multi-row inserts use the union of defined keys (first-seen order).
+- Missing/undefined values in multi-row inserts emit `DEFAULT`.
 - `upsert`:
   - `onConflict` can be a string or array.
   - String targets are quoted unless already quoted or parenthesized.

@@ -814,6 +814,7 @@ await client
 ```
 
 Empty array `insert([])` throws `Empty array provided for insert`.
+`undefined` fields in insert/update/upsert payloads are omitted. For multi-row inserts, missing/undefined values emit `DEFAULT`. Single-row inserts with no defined fields emit `DEFAULT VALUES`.
 
 ### Data Types (JSONB/Arrays/BigInt)
 

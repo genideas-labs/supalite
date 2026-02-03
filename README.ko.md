@@ -814,6 +814,7 @@ await client
 ```
 
 빈 배열 `insert([])`는 `Empty array provided for insert` 에러가 발생합니다.
+`undefined` 필드는 insert/update/upsert에서 제외됩니다. multi-row insert에서 누락/undefined는 `DEFAULT`로 처리되며, 단일 insert에서 정의된 필드가 없으면 `DEFAULT VALUES`가 사용됩니다.
 
 ### 데이터 타입 (JSONB/배열/BigInt)
 
