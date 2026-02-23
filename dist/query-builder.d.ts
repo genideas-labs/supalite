@@ -32,6 +32,10 @@ export declare class QueryBuilder<T extends DatabaseSchema, S extends SchemaName
     private splitOrConditions;
     private splitOrCondition;
     private unescapeOrValue;
+    private normalizeOrLiteralValue;
+    private parseOrInValues;
+    private buildOrLeafClause;
+    private parseOrSegment;
     private parseSelection;
     private quoteIdentifier;
     private quoteColumn;

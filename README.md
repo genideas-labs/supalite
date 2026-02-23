@@ -533,6 +533,18 @@ const { data: credits } = await client
   .eq('wallet_id', 123)
   .gt('amount', 0)
   .or('valid_until.is.null,valid_until.gt.now()');
+
+// Nested and(...) inside or(...) (PostgREST-style keyset pattern)
+const { data: images } = await client
+  .from('priv_images')
+  .select('id,created_at')
+  .or('created_at.lt.2026-02-13T09:09:32.000Z,and(created_at.eq.2026-02-13T09:09:32.000Z,id.lt.1462)');
+
+// in / not.* inside or()
+const { data: users } = await client
+  .from('users')
+  .select('*')
+  .or('and(id.in.(1,2,3),status.not.eq.inactive)');
 ```
 
 ### Sorting/Pagination
@@ -1032,7 +1044,11 @@ await client.close();
 - `is(column, value)`: IS
 - `not(column, operator, value)`: currently only `not('column', 'is', null)` is supported
 - `contains(column, value)`: array/JSON contains
-- `or(conditions)`: OR condition string (ops: eq/neq/like/ilike/gt/gte/lt/lte/is, `now()` is inlined as `NOW()`); quote values to include dots/commas (e.g. `name.eq."last, first"`)
+- `or(conditions)`: OR condition string (ops: eq/neq/like/ilike/gt/gte/lt/lte/is/in + `not.*`, `now()` is inlined as `NOW()`)
+  - Supports nested `and(...)` and `or(...)` groups (PostgREST-style), e.g. `created_at.lt.ts,and(created_at.eq.ts,id.lt.1462)`
+  - Supports `in.(...)` and negated ops such as `status.not.eq.inactive`, `id.not.in.(1,2,3)`, `deleted_at.not.is.null`
+  - Quote values to include dots/commas (e.g. `name.eq."last, first"`)
+  - Related table filters are not supported inside `or()`
 
 ### Other methods
 

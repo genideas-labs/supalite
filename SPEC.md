@@ -79,11 +79,15 @@ Notes:
 - `in(col, [..., null])` emits `("col" IN (...) OR "col" IS NULL)`; if only NULLs are provided, it emits `IS NULL`.
 - `contains` uses `@>`.
 - `or()` expects `col.op.value` segments separated by commas.
-  - Supported ops: `eq`, `neq`, `like`, `ilike`, `gt`, `gte`, `lt`, `lte`, `is`.
+  - Nested `and(...)` and `or(...)` groups are supported inside `or()` (e.g. `created_at.lt.ts,and(created_at.eq.ts,id.lt.1462)`).
+  - Supported ops: `eq`, `neq`, `like`, `ilike`, `gt`, `gte`, `lt`, `lte`, `is`, `in`.
+  - Negated forms are supported via `not.*` (e.g. `status.not.eq.inactive`, `deleted_at.not.is.null`, `id.not.in.(1,2)`).
   - `value` is treated as a literal string; `null` maps to SQL NULL; numeric strings are kept as strings.
   - `is.null` uses `IS NULL` without a placeholder.
+  - `in.(...)` values are parsed as a parenthesized list; `null` entries are handled as `IS NULL`/`IS NOT NULL` branches.
   - `now()` is inlined as `NOW()` for comparison operators (no placeholder).
   - Quote values to include dots/commas (e.g. `name.eq."last, first"`).
+  - Malformed nested expressions throw clear parser errors (for example, unbalanced parentheses).
 
 ### 4.3 Ordering and pagination
 - `order('col')` defaults to `ASC`.

@@ -103,6 +103,7 @@ export class QueryBuilder<
     let current = '';
     let inQuotes = false;
     let escaped = false;
+    let depth = 0;
 
     for (let i = 0; i < input.length; i += 1) {
       const char = input[i];
@@ -121,7 +122,22 @@ export class QueryBuilder<
         current += char;
         continue;
       }
-      if (char === ',' && !inQuotes) {
+      if (!inQuotes) {
+        if (char === '(') {
+          depth += 1;
+          current += char;
+          continue;
+        }
+        if (char === ')') {
+          if (depth === 0) {
+            throw new Error('Malformed or() condition: unexpected closing parenthesis.');
+          }
+          depth -= 1;
+          current += char;
+          continue;
+        }
+      }
+      if (char === ',' && !inQuotes && depth === 0) {
         if (current.trim()) {
           parts.push(current.trim());
         }
@@ -131,6 +147,12 @@ export class QueryBuilder<
       current += char;
     }
 
+    if (inQuotes) {
+      throw new Error('Malformed or() condition: unterminated double quote.');
+    }
+    if (depth !== 0) {
+      throw new Error('Malformed or() condition: unbalanced parentheses.');
+    }
     if (current.trim()) {
       parts.push(current.trim());
     }
@@ -140,8 +162,7 @@ export class QueryBuilder<
   private splitOrCondition(condition: string): { field: string; op: string; value: string } | null {
     let inQuotes = false;
     let escaped = false;
-    let firstDot = -1;
-    let secondDot = -1;
+    const dotPositions: number[] = [];
 
     for (let i = 0; i < condition.length; i += 1) {
       const char = condition[i];
@@ -158,19 +179,42 @@ export class QueryBuilder<
         continue;
       }
       if (char === '.' && !inQuotes) {
-        if (firstDot === -1) {
-          firstDot = i;
-        } else {
-          secondDot = i;
-          break;
+        dotPositions.push(i);
+      }
+    }
+
+    if (dotPositions.length < 2) {
+      return null;
+    }
+
+    const validOperators = new Set(['eq', 'neq', 'ilike', 'like', 'gt', 'gte', 'lt', 'lte', 'is', 'in']);
+    for (let left = 0; left < dotPositions.length - 1; left += 1) {
+      for (let right = left + 1; right < dotPositions.length; right += 1) {
+        const firstDot = dotPositions[left];
+        const secondDot = dotPositions[right];
+        const field = condition.slice(0, firstDot).trim();
+        const op = condition.slice(firstDot + 1, secondDot).trim();
+        const value = condition.slice(secondDot + 1).trim();
+
+        if (field && op && value && validOperators.has(op)) {
+          return { field, op, value };
+        }
+
+        if (op === 'not') {
+          for (let third = right + 1; third < dotPositions.length; third += 1) {
+            const thirdDot = dotPositions[third];
+            const notOp = condition.slice(secondDot + 1, thirdDot).trim();
+            const notValue = condition.slice(thirdDot + 1).trim();
+            if (field && notOp && notValue && validOperators.has(notOp)) {
+              return { field, op: `not.${notOp}`, value: notValue };
+            }
+          }
         }
       }
     }
 
-    if (firstDot === -1 || secondDot === -1) {
-      return null;
-    }
-
+    const firstDot = dotPositions[0];
+    const secondDot = dotPositions[1];
     const field = condition.slice(0, firstDot).trim();
     const op = condition.slice(firstDot + 1, secondDot).trim();
     const value = condition.slice(secondDot + 1).trim();
@@ -180,6 +224,213 @@ export class QueryBuilder<
 
   private unescapeOrValue(value: string): string {
     return value.replace(/\\([\\\".,])/g, '$1');
+  }
+
+  private normalizeOrLiteralValue(value: string): any {
+    if (value === 'null') {
+      return null;
+    }
+    if (!isNaN(Number(value))) {
+      return value;
+    }
+    if (value.match(/^\d{4}-\d{2}-\d{2}/)) {
+      return value;
+    }
+    return value;
+  }
+
+  private parseOrInValues(value: string): string[] {
+    if (!value.startsWith('(') || !value.endsWith(')')) {
+      throw new Error(
+        `Invalid or() IN value: "${value}". Expected parenthesized list like "(a,b)".`
+      );
+    }
+
+    const inner = value.slice(1, -1).trim();
+    if (!inner) {
+      return [];
+    }
+
+    return this.splitOrConditions(inner).map((raw) => {
+      let item = raw.trim();
+      if (item.startsWith('"') && item.endsWith('"')) {
+        item = item.slice(1, -1);
+      }
+      return this.unescapeOrValue(item);
+    });
+  }
+
+  private buildOrLeafClause(condition: string): string {
+    const parsed = this.splitOrCondition(condition);
+    if (!parsed) {
+      throw new Error(
+        `Invalid or() condition segment: "${condition}". Expected "column.operator.value".`
+      );
+    }
+
+    const { field, op, value } = parsed;
+    if (!field || !op) {
+      throw new Error(
+        `Invalid or() condition segment: "${condition}". Expected "column.operator.value".`
+      );
+    }
+
+    if (field.includes('.')) {
+      throw new Error('or() does not support related table filters.');
+    }
+
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(field)) {
+      throw new Error(
+        `Invalid or() column: "${field}". Use "column.operator.value" or nested and(...)/or(...).`
+      );
+    }
+
+    const isNegated = op.startsWith('not.');
+    const baseOp = isNegated ? op.slice(4) : op;
+
+    const validOperators = ['eq', 'neq', 'ilike', 'like', 'gt', 'gte', 'lt', 'lte', 'is', 'in'];
+    if (!validOperators.includes(baseOp)) {
+      throw new Error(`Invalid operator: ${baseOp}`);
+    }
+
+    let normalizedValue = value;
+    if (normalizedValue.startsWith('"') && normalizedValue.endsWith('"')) {
+      normalizedValue = normalizedValue.slice(1, -1);
+    }
+    normalizedValue = this.unescapeOrValue(normalizedValue);
+
+    const isNullValue = normalizedValue === 'null';
+    const isNowValue = typeof normalizedValue === 'string' && normalizedValue.toLowerCase() === 'now()';
+    const quotedField = this.quoteColumn(field);
+
+    const buildPlaceholderClause = (sqlOp: string) => {
+      this.whereValues.push(this.normalizeOrLiteralValue(normalizedValue));
+      const paramIndex = this.whereValues.length;
+      return `${quotedField} ${sqlOp} $${paramIndex}`;
+    };
+
+    const buildClause = (sqlOp: string) => {
+      if (isNowValue) {
+        return `${quotedField} ${sqlOp} NOW()`;
+      }
+        return buildPlaceholderClause(sqlOp);
+    };
+
+    if (baseOp === 'in') {
+      const parsedValues = this.parseOrInValues(normalizedValue);
+      const hasNull = parsedValues.includes('null');
+      const nonNullValues = parsedValues.filter((item) => item !== 'null');
+
+      const pushPlaceholders = (items: string[]): string => {
+        const placeholders = items.map((item) => {
+          this.whereValues.push(this.normalizeOrLiteralValue(item));
+          return `$${this.whereValues.length}`;
+        });
+        return placeholders.join(',');
+      };
+
+      if (!isNegated) {
+        if (nonNullValues.length === 0 && hasNull) {
+          return `${quotedField} IS NULL`;
+        }
+        if (nonNullValues.length === 0) {
+          return 'FALSE';
+        }
+
+        const inList = pushPlaceholders(nonNullValues);
+        if (hasNull) {
+          return `(${quotedField} IN (${inList}) OR ${quotedField} IS NULL)`;
+        }
+        return `${quotedField} IN (${inList})`;
+      }
+
+      if (nonNullValues.length === 0 && hasNull) {
+        return `${quotedField} IS NOT NULL`;
+      }
+      if (nonNullValues.length === 0) {
+        return 'TRUE';
+      }
+
+      const notInList = pushPlaceholders(nonNullValues);
+      if (hasNull) {
+        return `(${quotedField} NOT IN (${notInList}) AND ${quotedField} IS NOT NULL)`;
+      }
+      return `${quotedField} NOT IN (${notInList})`;
+    }
+
+    const resolveSqlOperator = (operator: string): string => {
+      if (!isNegated) {
+        return operator;
+      }
+      switch (operator) {
+        case '=':
+          return '!=';
+        case '!=':
+          return '=';
+        case 'LIKE':
+          return 'NOT LIKE';
+        case 'ILIKE':
+          return 'NOT ILIKE';
+        case '>':
+          return '<=';
+        case '>=':
+          return '<';
+        case '<':
+          return '>=';
+        case '<=':
+          return '>';
+        case 'IS':
+          return 'IS NOT';
+        default:
+          return operator;
+      }
+    };
+
+    switch (baseOp) {
+      case 'eq':
+        return buildClause(resolveSqlOperator('='));
+      case 'neq':
+        return buildClause(resolveSqlOperator('!='));
+      case 'ilike':
+        return buildClause(resolveSqlOperator('ILIKE'));
+      case 'like':
+        return buildClause(resolveSqlOperator('LIKE'));
+      case 'gt':
+        return buildClause(resolveSqlOperator('>'));
+      case 'gte':
+        return buildClause(resolveSqlOperator('>='));
+      case 'lt':
+        return buildClause(resolveSqlOperator('<'));
+      case 'lte':
+        return buildClause(resolveSqlOperator('<='));
+      case 'is':
+        if (isNullValue) {
+          return isNegated ? `${quotedField} IS NOT NULL` : `${quotedField} IS NULL`;
+        }
+        return buildPlaceholderClause(resolveSqlOperator('IS'));
+      default:
+        throw new Error(`Invalid operator: ${baseOp}`);
+    }
+  }
+
+  private parseOrSegment(condition: string): string {
+    const trimmed = condition.trim();
+    if (!trimmed) {
+      throw new Error('Invalid or() condition: empty segment.');
+    }
+
+    const lower = trimmed.toLowerCase();
+    if ((lower.startsWith('and(') || lower.startsWith('or(')) && trimmed.endsWith(')')) {
+      const useAnd = lower.startsWith('and(');
+      const inner = trimmed.slice(trimmed.indexOf('(') + 1, -1).trim();
+      const parts = this.splitOrConditions(inner).map((part) => this.parseOrSegment(part));
+      if (parts.length === 0) {
+        throw new Error(`Invalid or() condition: ${useAnd ? 'and' : 'or'}(...) requires at least one segment.`);
+      }
+      return `(${parts.join(useAnd ? ' AND ' : ' OR ')})`;
+    }
+
+    return this.buildOrLeafClause(trimmed);
   }
 
   private parseSelection(input: string): Selection {
@@ -563,85 +814,8 @@ export class QueryBuilder<
   }
 
   or(conditions: string): this {
-    const orParts = this.splitOrConditions(conditions).map(condition => {
-      const parsed = this.splitOrCondition(condition);
-      if (!parsed) {
-        return '';
-      }
-      const { field, op, value } = parsed;
+    const orParts = this.splitOrConditions(conditions).map((condition) => this.parseOrSegment(condition));
 
-      if (!field || !op) {
-        return '';
-      }
-
-      if (field.includes('.')) {
-        throw new Error('or() does not support related table filters.');
-      }
-      
-      const validOperators = ['eq', 'neq', 'ilike', 'like', 'gt', 'gte', 'lt', 'lte', 'is'];
-      if (!validOperators.includes(op)) {
-        throw new Error(`Invalid operator: ${op}`);
-      }
-
-      let normalizedValue = value;
-      if (normalizedValue.startsWith('"') && normalizedValue.endsWith('"')) {
-        normalizedValue = normalizedValue.slice(1, -1);
-      }
-      normalizedValue = this.unescapeOrValue(normalizedValue);
-
-      const isNullValue = normalizedValue === 'null';
-      const isNowValue = typeof normalizedValue === 'string' && normalizedValue.toLowerCase() === 'now()';
-      const quotedField = this.quoteColumn(field);
-
-      const buildPlaceholderClause = (sqlOp: string) => {
-        let processedValue: any = normalizedValue;
-        if (isNullValue) {
-          processedValue = null;
-        } else if (typeof normalizedValue === 'string' && !isNaN(Number(normalizedValue))) {
-          processedValue = normalizedValue;
-        } else if (typeof normalizedValue === 'string' && normalizedValue.match(/^\d{4}-\d{2}-\d{2}/)) {
-          processedValue = normalizedValue;
-        }
-
-        this.whereValues.push(processedValue);
-        const paramIndex = this.whereValues.length;
-        return `${quotedField} ${sqlOp} $${paramIndex}`;
-      };
-
-      const buildClause = (sqlOp: string) => {
-        if (isNowValue) {
-          return `${quotedField} ${sqlOp} NOW()`;
-        }
-        return buildPlaceholderClause(sqlOp);
-      };
-
-      switch (op) {
-        case 'eq':
-          return buildClause('=');
-        case 'neq':
-          return buildClause('!=');
-        case 'ilike':
-          return buildClause('ILIKE');
-        case 'like':
-          return buildClause('LIKE');
-        case 'gt':
-          return buildClause('>');
-        case 'gte':
-          return buildClause('>=');
-        case 'lt':
-          return buildClause('<');
-        case 'lte':
-          return buildClause('<=');
-        case 'is':
-          if (isNullValue) {
-            return `${quotedField} IS NULL`;
-          }
-          return buildPlaceholderClause('IS');
-        default:
-          return '';
-      }
-    }).filter(Boolean);
-    
     if (orParts.length > 0) {
       this.whereConditions.push(`(${orParts.join(' OR ')})`);
     }
