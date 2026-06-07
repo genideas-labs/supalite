@@ -340,6 +340,10 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
     }
   }
 
+  /**
+   * @deprecated Manual transaction control mutates this instance and is NOT
+   * concurrency-safe. Use `transaction(cb)` instead.
+   */
   // 트랜잭션 시작
   async begin(): Promise<void> {
     if (!this.client) {
@@ -349,37 +353,67 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
     this.isTransaction = true;
   }
 
+  /**
+   * @deprecated Manual transaction control mutates this instance and is NOT
+   * concurrency-safe. Use `transaction(cb)` instead, which runs on an isolated scope.
+   */
   // 트랜잭션 커밋
   async commit(): Promise<void> {
     if (this.isTransaction && this.client) {
-      await this.client.query('COMMIT');
-      this.client.release();
-      this.client = null;
-      this.isTransaction = false;
+      try {
+        await this.client.query('COMMIT');
+      } finally {
+        this.client.release();
+        this.client = null;
+        this.isTransaction = false;
+      }
     }
   }
 
+  /**
+   * @deprecated Manual transaction control mutates this instance and is NOT
+   * concurrency-safe. Use `transaction(cb)` instead, which runs on an isolated scope.
+   */
   // 트랜잭션 롤백
   async rollback(): Promise<void> {
     if (this.isTransaction && this.client) {
-      await this.client.query('ROLLBACK');
-      this.client.release();
-      this.client = null;
-      this.isTransaction = false;
+      try {
+        await this.client.query('ROLLBACK');
+      } finally {
+        this.client.release();
+        this.client = null;
+        this.isTransaction = false;
+      }
     }
   }
 
-  // 트랜잭션 실행
+  /**
+   * Creates an isolated SupaLitePG bound to the SAME pool but with independent
+   * transaction state (its own `client`/`isTransaction`). Used by transaction()
+   * so concurrent transactions never collide on shared instance state. The pool
+   * is shared and not owned (no error listener is attached — see constructor).
+   */
+  private createTransactionScope(): SupaLitePG<T> {
+    return new SupaLitePG<T>({
+      pool: this.pool,
+      schema: this.schema,
+      bigintTransform: this.bigintTransform,
+      verbose: this.verbose,
+    });
+  }
+
+  // 트랜잭션 실행 (concurrency-safe: isolated scope per call)
   async transaction<R>(
     callback: (client: SupaLitePG<T>) => Promise<R>
   ): Promise<R> {
-    await this.begin();
+    const tx = this.createTransactionScope();
+    await tx.begin();
     try {
-      const result = await callback(this);
-      await this.commit();
+      const result = await callback(tx);
+      await tx.commit();
       return result;
     } catch (error) {
-      await this.rollback();
+      await tx.rollback();
       throw error;
     }
   }
