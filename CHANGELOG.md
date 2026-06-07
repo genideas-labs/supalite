@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0
+
+### Fixed
+- `transaction(cb)` now runs on an isolated, connection-bound scope instead of mutating shared instance state. Concurrent transactions and concurrent non-transactional queries on the same client no longer interfere.
+- `commit()`/`rollback()` release the pooled connection in `finally`, preventing leaks and error-masking when COMMIT/ROLLBACK fails.
+- supalite no longer attaches an error listener to an externally-provided pool (`{ pool }`), preventing listener leaks when many clients share one pool.
+
+### Deprecated
+- Manual `begin()` / `commit()` / `rollback()` mutate the instance and are not concurrency-safe. Use `transaction(cb)`.
+
 ## [0.8.2] - 2026-02-23
 
 ### ✨ Added
