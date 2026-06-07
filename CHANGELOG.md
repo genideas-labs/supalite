@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.0
+## [0.9.0] - 2026-06-07
 
 ### Fixed
 - `transaction(cb)` now runs on an isolated, connection-bound scope instead of mutating shared instance state. Concurrent transactions and concurrent non-transactional queries on the same client no longer interfere.

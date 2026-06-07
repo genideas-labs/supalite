@@ -394,12 +394,18 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
    * is shared and not owned (no error listener is attached — see constructor).
    */
   private createTransactionScope(): SupaLitePG<T> {
-    return new SupaLitePG<T>({
+    const scope = new SupaLitePG<T>({
       pool: this.pool,
       schema: this.schema,
       bigintTransform: this.bigintTransform,
       verbose: this.verbose,
     });
+    // Share the read-mostly metadata caches so each transaction doesn't cold-populate
+    // information_schema. Safe: caches are append-only after the first miss, and JS is
+    // single-threaded (no torn writes across awaits).
+    scope.schemaCache = this.schemaCache;
+    scope.foreignKeyCache = this.foreignKeyCache;
+    return scope;
   }
 
   // 트랜잭션 실행 (concurrency-safe: isolated scope per call)
