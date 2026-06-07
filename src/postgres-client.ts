@@ -330,12 +330,14 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
       this.pool = new Pool(poolConfigOptions);
     }
 
-    // Error handling
-    this.pool.on('error', (err) => {
-      console.error('[SupaLite ERROR] Unexpected error on idle client', err);
-      // Consider if process.exit is too drastic for a library. Maybe re-throw or emit an event.
-      // process.exit(-1); 
-    });
+    // Error handling — only manage listeners on a pool we own. For an external
+    // pool (ownsPool=false) the caller owns its lifecycle and error handling;
+    // attaching here would leak a listener per constructed/forked client.
+    if (this.ownsPool) {
+      this.pool.on('error', (err) => {
+        console.error('[SupaLite ERROR] Unexpected error on idle client', err);
+      });
+    }
   }
 
   // 트랜잭션 시작
