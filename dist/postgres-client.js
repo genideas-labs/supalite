@@ -264,13 +264,19 @@ class SupaLitePG {
             }
             this.pool = new pg_1.Pool(poolConfigOptions);
         }
-        // Error handling
-        this.pool.on('error', (err) => {
-            console.error('[SupaLite ERROR] Unexpected error on idle client', err);
-            // Consider if process.exit is too drastic for a library. Maybe re-throw or emit an event.
-            // process.exit(-1); 
-        });
+        // Error handling — only manage listeners on a pool we own. For an external
+        // pool (ownsPool=false) the caller owns its lifecycle and error handling;
+        // attaching here would leak a listener per constructed/forked client.
+        if (this.ownsPool) {
+            this.pool.on('error', (err) => {
+                console.error('[SupaLite ERROR] Unexpected error on idle client', err);
+            });
+        }
     }
+    /**
+     * @deprecated Manual transaction control mutates this instance and is NOT
+     * concurrency-safe. Use `transaction(cb)` instead.
+     */
     // 트랜잭션 시작
     async begin() {
         if (!this.client) {
@@ -279,34 +285,71 @@ class SupaLitePG {
         await this.client.query('BEGIN');
         this.isTransaction = true;
     }
+    /**
+     * @deprecated Manual transaction control mutates this instance and is NOT
+     * concurrency-safe. Use `transaction(cb)` instead, which runs on an isolated scope.
+     */
     // 트랜잭션 커밋
     async commit() {
         if (this.isTransaction && this.client) {
-            await this.client.query('COMMIT');
-            this.client.release();
-            this.client = null;
-            this.isTransaction = false;
+            try {
+                await this.client.query('COMMIT');
+            }
+            finally {
+                this.client.release();
+                this.client = null;
+                this.isTransaction = false;
+            }
         }
     }
+    /**
+     * @deprecated Manual transaction control mutates this instance and is NOT
+     * concurrency-safe. Use `transaction(cb)` instead, which runs on an isolated scope.
+     */
     // 트랜잭션 롤백
     async rollback() {
         if (this.isTransaction && this.client) {
-            await this.client.query('ROLLBACK');
-            this.client.release();
-            this.client = null;
-            this.isTransaction = false;
+            try {
+                await this.client.query('ROLLBACK');
+            }
+            finally {
+                this.client.release();
+                this.client = null;
+                this.isTransaction = false;
+            }
         }
     }
-    // 트랜잭션 실행
+    /**
+     * Creates an isolated SupaLitePG bound to the SAME pool but with independent
+     * transaction state (its own `client`/`isTransaction`). Used by transaction()
+     * so concurrent transactions never collide on shared instance state. The pool
+     * is shared and not owned (no error listener is attached — see constructor).
+     */
+    createTransactionScope() {
+        const scope = new SupaLitePG({
+            pool: this.pool,
+            schema: this.schema,
+            bigintTransform: this.bigintTransform,
+            verbose: this.verbose,
+        });
+        // Share the read-mostly metadata caches so each transaction doesn't cold-populate
+        // information_schema. Safe: caches are append-only after the first miss, and JS is
+        // single-threaded (no torn writes across awaits).
+        scope.schemaCache = this.schemaCache;
+        scope.foreignKeyCache = this.foreignKeyCache;
+        return scope;
+    }
+    // 트랜잭션 실행 (concurrency-safe: isolated scope per call)
     async transaction(callback) {
-        await this.begin();
+        const tx = this.createTransactionScope();
+        await tx.begin();
         try {
-            const result = await callback(this);
-            await this.commit();
+            const result = await callback(tx);
+            await tx.commit();
             return result;
         }
         catch (error) {
-            await this.rollback();
+            await tx.rollback();
             throw error;
         }
     }
