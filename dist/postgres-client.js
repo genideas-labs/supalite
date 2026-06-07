@@ -282,8 +282,17 @@ class SupaLitePG {
         if (!this.client) {
             this.client = await this.pool.connect();
         }
-        await this.client.query('BEGIN');
-        this.isTransaction = true;
+        try {
+            await this.client.query('BEGIN');
+            this.isTransaction = true;
+        }
+        catch (err) {
+            // BEGIN failed: release the just-acquired connection so it doesn't leak
+            // (isTransaction is still false, so commit()/rollback() won't release it).
+            this.client.release();
+            this.client = null;
+            throw err;
+        }
     }
     /**
      * @deprecated Manual transaction control mutates this instance and is NOT
@@ -349,7 +358,15 @@ class SupaLitePG {
             return result;
         }
         catch (error) {
-            await tx.rollback();
+            // Roll back, but never let a rollback failure mask the original error.
+            try {
+                await tx.rollback();
+            }
+            catch (rollbackError) {
+                if (this.verbose) {
+                    console.error('[SupaLite] rollback failed after a transaction error', rollbackError);
+                }
+            }
             throw error;
         }
     }
