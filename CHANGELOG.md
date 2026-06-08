@@ -10,6 +10,9 @@
 ### Deprecated
 - Manual `begin()` / `commit()` / `rollback()` mutate the instance and are not concurrency-safe. Use `transaction(cb)`.
 
+### Tests
+- Added DB-free regression tests pinning the concurrency guarantees: each `transaction()` acquires its own pooled connection, the parent instance's tx state is never mutated, the connection is released on BEGIN/COMMIT/ROLLBACK failure, and a failing rollback never masks the original error. Added integration tests for rollback isolation between concurrent transactions and for no connection leak under a single-connection pool.
+
 ## [0.8.2] - 2026-02-23
 
 ### ✨ Added
