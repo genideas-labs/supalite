@@ -1,4 +1,4 @@
-import { SupaliteConfig, QueryOptions, FilterOptions, DatabaseSchema } from './types';
+import { SupaliteConfig, DatabaseSchema } from './types';
 import { SupaLitePG } from './postgres-client';
 
 export class SupaliteClient<T extends DatabaseSchema> extends SupaLitePG<T> {

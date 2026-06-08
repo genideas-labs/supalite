@@ -165,7 +165,7 @@ class QueryBuilder {
         return { field, op, value };
     }
     unescapeOrValue(value) {
-        return value.replace(/\\([\\\".,])/g, '$1');
+        return value.replace(/\\([\\".,])/g, '$1');
     }
     normalizeOrLiteralValue(value) {
         if (value === 'null') {
