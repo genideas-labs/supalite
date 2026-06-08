@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.9.0] - 2026-06-07
+## [0.9.0] - 2026-06-08
 
 ### Fixed
 - `transaction(cb)` now runs on an isolated, connection-bound scope instead of mutating shared instance state. Concurrent transactions and concurrent non-transactional queries on the same client no longer interfere.
@@ -13,6 +13,9 @@
 
 ### Tests
 - Added DB-free regression tests pinning the concurrency guarantees: each `transaction()` acquires its own pooled connection, the parent instance's tx state is never mutated, the connection is released on BEGIN/COMMIT/ROLLBACK failure, and a failing rollback never masks the original error. Added integration tests for rollback isolation between concurrent transactions and for no connection leak under a single-connection pool.
+
+### Compatibility
+- Fully backward-compatible: the public API and exported type surface are unchanged, and the runtime `pg` range stays `^8.11.3`. The transaction rework is internal; `begin()`/`commit()`/`rollback()` still work (deprecated).
 
 ## [0.8.2] - 2026-02-23
 

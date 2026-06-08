@@ -997,6 +997,10 @@ await client.transaction(async (tx) => {
 });
 ```
 
+`transaction(cb)`은 콜백을 **격리된 연결 전용 스코프**에서 실행합니다. 호출마다 풀에서 자체 연결을 확보하므로, 같은 클라이언트에서 동시에 실행되는 `transaction(cb)`끼리 서로 간섭하지 않고, 일반(비트랜잭션) 쿼리는 계속 풀을 사용합니다. 콜백이 정상 종료하면 커밋하고 예외가 발생하면 롤백하며 — 롤백 실패가 원래 에러를 가리지 않고, 연결은 항상 풀로 반환됩니다.
+
+> 수동 `begin()` / `commit()` / `rollback()` 대신 `transaction(cb)`을 사용하세요. 수동 메소드는 클라이언트 인스턴스 상태를 변경하며 동시성에 **안전하지 않습니다**(하위 호환을 위해 유지, deprecated).
+
 ### 연결 확인
 
 ```typescript
@@ -1046,10 +1050,10 @@ await client.close();
 
 ### 트랜잭션 메소드
 
-- `transaction<T>(callback: (client: SupaLitePG) => Promise<T>)`: 트랜잭션 실행
-- `begin()`: 트랜잭션 시작
-- `commit()`: 트랜잭션 커밋
-- `rollback()`: 트랜잭션 롤백
+- `transaction<T>(callback: (client: SupaLitePG) => Promise<T>)`: 트랜잭션 실행 (동시성 안전, 격리 스코프에서 실행되어 성공 시 커밋·예외 시 롤백)
+- `begin()`: 트랜잭션 시작 — _deprecated_: 인스턴스 상태를 변경하며 동시성 비안전, `transaction(cb)` 사용
+- `commit()`: 트랜잭션 커밋 — _deprecated_: `transaction(cb)` 사용
+- `rollback()`: 트랜잭션 롤백 — _deprecated_: `transaction(cb)` 사용
 
 ### 클라이언트 메소드
 
