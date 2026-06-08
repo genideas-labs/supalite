@@ -216,6 +216,38 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .footer__links a:hover { color: var(--accent); text-decoration: none; }
 .footer__copy { margin-top: 34px; padding-top: 22px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
 
+/* ===================== Benchmark (perf bars) ===================== */
+.perf { max-width: 720px; margin: 46px auto 0; display: grid; gap: 18px; }
+.perf__head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 7px; }
+.perf__name { font-weight: 600; font-size: 0.98rem; }
+.perf__name small { color: var(--muted); font-family: var(--mono); font-size: 0.68rem; margin-left: 7px; text-transform: uppercase; letter-spacing: 0.08em; }
+.perf__val { font-family: var(--mono); color: var(--text-soft); font-size: 0.9rem; white-space: nowrap; }
+.perf__track { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; height: 24px; overflow: hidden; }
+.perf__bar { height: 100%; border-radius: 7px 0 0 7px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); min-width: 3px; transition: width .6s ease; }
+.perf__bar--slow { background: linear-gradient(90deg, #c2706a, #e0a574); }
+.perf__bar--win { box-shadow: inset 0 0 0 1px rgba(45, 212, 191, 0.5); }
+.up { color: var(--accent-2); font-weight: 700; margin-left: 8px; }
+
+.bench__note { max-width: 720px; margin: 28px auto 0; color: var(--muted); font-size: 0.85rem; line-height: 1.7; }
+.bench__note code { color: var(--accent); }
+.bench__note strong { color: var(--text-soft); }
+
+/* ===================== BigInt table ===================== */
+.bigint { max-width: 780px; margin: 46px auto 0; }
+.bigint__table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.bigint__table th, .bigint__table td { text-align: left; padding: 13px 18px; border-bottom: 1px solid var(--border); font-size: 0.93rem; vertical-align: middle; }
+.bigint__table thead th { background: var(--surface-2); color: var(--muted); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.bigint__table tbody tr:last-child td { border-bottom: 0; }
+.bigint__table td:first-child { font-weight: 600; }
+.bigint__table code { color: var(--text-soft); background: var(--bg); padding: 2px 7px; border-radius: 5px; font-size: 0.8rem; }
+.bigint__table small { color: var(--muted); font-size: 0.8rem; }
+.bigint__table .bad { color: var(--danger); white-space: nowrap; }
+.bigint__table .good { color: var(--accent); white-space: nowrap; font-weight: 600; }
+.bigint__win { background: var(--accent-soft); }
+.bigint__win code { color: var(--accent); background: rgba(0, 0, 0, 0.25); }
+.bigint__note { max-width: 780px; margin: 18px auto 0; color: var(--muted); font-size: 0.9rem; line-height: 1.7; }
+.bigint__note code { color: var(--accent); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; }
+
 /* ===================== Responsive ===================== */
 @media (max-width: 860px) {
   .grid { grid-template-columns: repeat(2, 1fr); }
@@ -224,6 +256,9 @@ code { font-family: var(--mono); font-size: 0.92em; }
 @media (max-width: 620px) {
   .nav__links { display: none; }
   .grid { grid-template-columns: 1fr; }
+  .bigint { overflow-x: auto; }
+  .bigint__table { min-width: 460px; }
+  .perf__head { flex-wrap: wrap; gap: 2px; }
   .hero { padding: 64px 0 56px; }
   .install { width: 100%; justify-content: space-between; }
   .footer__inner { flex-direction: column; gap: 28px; }

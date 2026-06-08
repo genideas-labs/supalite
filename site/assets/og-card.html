@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<!-- Source for assets/og-image.png (1200x630). Regenerate after edits:
+     render this file at viewport 1200x630 and screenshot to og-image.png. -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 1200px; height: 630px; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: #0a0e14;
+      color: #e6edf6;
+      position: relative;
+      overflow: hidden;
+    }
+    .glow {
+      position: absolute; inset: 0;
+      background:
+        radial-gradient(50% 55% at 22% 0%, rgba(45, 212, 191, 0.22), transparent 70%),
+        radial-gradient(45% 50% at 100% 100%, rgba(74, 222, 128, 0.12), transparent 70%);
+    }
+    .frame { position: absolute; inset: 0; padding: 72px 80px; display: flex; flex-direction: column; }
+    .brand { display: flex; align-items: center; gap: 16px; }
+    .brand .mark { width: 52px; height: 52px; border-radius: 13px; }
+    .brand .name { font-weight: 800; font-size: 38px; letter-spacing: -0.02em; }
+    .eyebrow {
+      font-family: 'JetBrains Mono', monospace; font-size: 19px; letter-spacing: 0.22em;
+      text-transform: uppercase; color: #2dd4bf; margin-top: 64px;
+    }
+    h1 { font-size: 70px; font-weight: 800; line-height: 1.07; letter-spacing: -0.025em; margin-top: 18px; max-width: 1000px; }
+    h1 .accent { color: #2dd4bf; }
+    .sub { margin-top: 26px; font-size: 27px; color: #c2cdda; font-weight: 500; max-width: 940px; }
+    .foot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; }
+    .install {
+      display: inline-flex; align-items: center; gap: 12px;
+      background: #11161f; border: 1px solid rgba(255,255,255,0.14); border-radius: 12px;
+      padding: 16px 22px; font-family: 'JetBrains Mono', monospace; font-size: 25px;
+    }
+    .install .p { color: #2dd4bf; }
+    .repo { font-family: 'JetBrains Mono', monospace; font-size: 21px; color: #8a96a8; }
+  </style>
+</head>
+<body>
+  <div class="glow"></div>
+  <div class="frame">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+        <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#2dd4bf"/><stop offset="1" stop-color="#4ade80"/>
+        </linearGradient></defs>
+        <rect width="32" height="32" rx="8" fill="#0d121b"/>
+        <path d="M18.2 4 L9 17.4 h5.6 L13.4 28 L23 13.4 h-5.4 Z" fill="url(#g)"/>
+      </svg>
+      <span class="name">SupaLite</span>
+    </div>
+
+    <p class="eyebrow">TypeScript · PostgreSQL · MIT</p>
+    <h1>Supabase-style queries,<br /><span class="accent">without</span> the serverless latency.</h1>
+    <p class="sub">Lightweight TypeScript PostgreSQL client — query builder · RPC · transactions.</p>
+
+    <div class="foot">
+      <div class="install"><span class="p">$</span><span>npm install supalite</span></div>
+      <span class="repo">genideas-labs/supalite</span>
+    </div>
+  </div>
+</body>
+</html>

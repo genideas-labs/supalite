@@ -6,6 +6,7 @@
   // so this dictionary only needs the `ko` translations. Keys = data-i18n.
   var KO = {
     'nav.features': '기능',
+    'nav.benchmark': '벤치마크',
     'nav.compare': '비교',
     'nav.quickstart': '빠른 시작',
     'copy': '복사',
@@ -56,7 +57,28 @@
     'quickstart.step4': '데이터베이스에서 타입 생성',
     'quickstart.docs': '전체 문서 보기 →',
 
-    'footer.tagline': 'Supabase 스타일 API를 가진 가벼운 TypeScript PostgreSQL 클라이언트.'
+    'footer.tagline': 'Supabase 스타일 API를 가진 가벼운 TypeScript PostgreSQL 클라이언트.',
+
+    'bench.heading': '얼마나 빠른가?',
+    'bench.lead': '같은 데이터베이스, 같은 쿼리, 네 가지 클라이언트. supabase-js는 REST/PostgREST 세금을 내지만 직접 드라이버는 아닙니다 — supalite는 Supabase의 API를 유지하면서 그 속도를 따라잡습니다. 중앙값(p50) 지연, 낮을수록 좋음:',
+    'bench.rest': 'REST',
+    'bench.direct': '직접',
+    'bench.note': '<strong>측정 방법:</strong> 로컬 Supabase 스택(PostgREST) vs 직접 Postgres, 같은 머신, 동일 쿼리(5개 컬럼, <code>limit(20)</code>), 워밍업 후 300회 인터리브 측정. 네트워크가 빠진 HTTP/PostgREST API 계층 오버헤드만 잰 수치로, 실제 클라우드 배포에서는 네트워크 홉과 콜드스타트가 더해져 차이가 더 벌어집니다. supalite·Drizzle·Prisma는 모두 Postgres에 직접 연결하므로 같은 티어입니다. repo의 <a href="https://github.com/genideas-labs/supalite/tree/main/benchmarks">benchmarks/</a>로 직접 재현해 보세요.',
+
+    'bigint.heading': '그리고 64비트 ID가 살아남습니다',
+    'bigint.lead': 'PostgreSQL <code>BIGINT</code>는 9,223,372,036,854,775,807까지 갑니다 — JavaScript의 안전 정수 한계(2<sup>53</sup>-1)를 넘죠. 각 클라이언트가 바로 그 값을 실제로 어떻게 반환하는지:',
+    'bigint.th.client': '클라이언트',
+    'bigint.th.returns': 'JS에서 반환된 값',
+    'bigint.th.verdict': '결과',
+    'bigint.t.number': '(number)',
+    'bigint.t.bigint': '(BigInt)',
+    'bigint.t.drizzle': 'number → 손상, 또는 BigInt → throw',
+    'bigint.t.string': '(string)',
+    'bigint.v.corrupt': '✗ 조용히 잘못된 값',
+    'bigint.v.throws': '✗ JSON.stringify가 throw',
+    'bigint.v.poison': '✗ 양쪽 다 함정',
+    'bigint.v.safe': '✓ 정밀 & JSON-safe',
+    'bigint.note': "supalite의 <code>bigintTransform</code> 기본값은 <code>'number-or-string'</code> — 안전하게 들어가면 number, 아니면 string으로 반환합니다. 그래서 정밀하면서 <em>동시에</em> <code>JSON.stringify</code>를 통과합니다. 설정 없이 기본 동작이며, 클라이언트별로 조정 가능합니다."
   };
 
   var COPY_LABEL = { en: 'Copy', ko: '복사' };

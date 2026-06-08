@@ -136,3 +136,6 @@ out
 .yarn/install-state.gz
 .pnp.*
 .gstack/
+
+# benchmark output
+benchmarks/results.json
