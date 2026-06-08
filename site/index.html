@@ -6,6 +6,10 @@
   <title>SupaLite — a lightweight TypeScript PostgreSQL client with a Supabase-style API</title>
   <meta name="description" content="SupaLite is a lightweight TypeScript PostgreSQL client with the Supabase query builder you already know — query builder, RPC, and transactions, with less overhead than serverless Supabase." />
   <meta name="theme-color" content="#0a0e14" />
+  <link rel="canonical" href="https://genideas-labs.github.io/supalite/" />
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+  <meta name="author" content="Genideas Inc." />
+  <meta name="keywords" content="lightweight supabase alternative, supabase-js alternative, typescript postgresql client, postgres query builder, supabase query builder, postgres transactions, bigint precision javascript, prisma alternative, drizzle alternative" />
 
   <!-- Open Graph -->
   <meta property="og:type" content="website" />
@@ -28,6 +32,88 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
   <link rel="stylesheet" href="assets/styles.css" />
+
+  <!-- Structured data for search + AI engines -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "SupaLite",
+    "alternateName": "supalite",
+    "description": "A lightweight TypeScript PostgreSQL client with a Supabase-style query builder. Keeps the familiar .from().select().eq() API but connects directly to Postgres, giving you query builder, RPC, and transactions with less overhead than the supabase-js REST client.",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Node.js",
+    "programmingLanguage": "TypeScript",
+    "url": "https://genideas-labs.github.io/supalite/",
+    "downloadUrl": "https://www.npmjs.com/package/supalite",
+    "installUrl": "https://www.npmjs.com/package/supalite",
+    "codeRepository": "https://github.com/genideas-labs/supalite",
+    "license": "https://opensource.org/licenses/MIT",
+    "author": { "@type": "Organization", "name": "Genideas Inc." },
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "featureList": [
+      "Supabase-style typed query builder",
+      "Concurrency-safe transactions",
+      "RPC (stored procedure) calls",
+      "Multi-schema support",
+      "Connection pooling and direct SQL (no REST overhead)",
+      "JSON-safe 64-bit BIGINT handling",
+      "supalite gen types code generation"
+    ],
+    "sameAs": [
+      "https://www.npmjs.com/package/supalite",
+      "https://github.com/genideas-labs/supalite"
+    ]
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "What is SupaLite?",
+        "acceptedAnswer": { "@type": "Answer", "text": "SupaLite is a lightweight TypeScript PostgreSQL client with a Supabase-style query builder. It keeps the familiar .from().select().eq() API but talks directly to Postgres, so you get the query builder, RPC, and transactions with less overhead than the supabase-js REST client. It is MIT licensed and available on npm as 'supalite'." }
+      },
+      {
+        "@type": "Question",
+        "name": "Is SupaLite faster than supabase-js?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes, for database queries. supabase-js goes through the REST/PostgREST HTTP layer while SupaLite connects directly to Postgres. In a same-machine benchmark with an identical query over 300 iterations, SupaLite's median (p50) latency was about 0.24 ms versus about 1.0 ms for supabase-js — roughly 4x lower — placing it in the same tier as Drizzle and Prisma. Real cloud deployments add network hops on top, widening the gap." }
+      },
+      {
+        "@type": "Question",
+        "name": "Does SupaLite support transactions?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes. SupaLite provides concurrency-safe database transactions via client.transaction(async (tx) => { ... }), which the Supabase client does not support. Each call runs on its own pooled connection, commits on success, and rolls back on error." }
+      },
+      {
+        "@type": "Question",
+        "name": "How does SupaLite handle 64-bit integers (BIGINT)?",
+        "acceptedAnswer": { "@type": "Answer", "text": "PostgreSQL BIGINT can exceed JavaScript's safe integer limit (2^53-1). SupaLite's bigintTransform option defaults to 'number-or-string': it returns a plain number when the value is safe and a string when it isn't, so values stay precise and JSON-serializable. By contrast, supabase-js returns a JSON number and loses precision, while Prisma and Drizzle return a BigInt that throws on JSON.stringify." }
+      },
+      {
+        "@type": "Question",
+        "name": "SupaLite vs Prisma vs Drizzle — which should I use?",
+        "acceptedAnswer": { "@type": "Answer", "text": "SupaLite is a thin, SQL-close query layer with Supabase ergonomics; choose it when you want minimal abstraction or are migrating off Supabase and handle migrations separately. Choose Prisma or Drizzle when you want schema-first modeling and built-in migrations. All three connect directly to Postgres and perform similarly; SupaLite additionally ships JSON-safe BIGINT handling by default." }
+      },
+      {
+        "@type": "Question",
+        "name": "Does SupaLite support auth, storage, or realtime?",
+        "acceptedAnswer": { "@type": "Answer", "text": "No. SupaLite focuses on the database layer: query builder, RPC, and transactions. For auth, storage, or realtime, keep using supabase-js or dedicated services such as Cognito/Google Identity, S3/GCS, and a pub/sub or LISTEN/NOTIFY gateway." }
+      },
+      {
+        "@type": "Question",
+        "name": "Can I migrate from Supabase to SupaLite?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes. SupaLite mirrors the Supabase query-builder API, so most .from().select() queries work unchanged. It replaces only the database query layer, so you will still need alternatives for auth, storage, and realtime. It also includes 'supalite gen types' for Supabase-compatible TypeScript type generation." }
+      },
+      {
+        "@type": "Question",
+        "name": "How do I install SupaLite?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Run 'npm install supalite'. It is an MIT-licensed npm package that works with any PostgreSQL database. Connect with new SupaLitePG({ connectionString }) and query with the Supabase-style builder." }
+      }
+    ]
+  }
+  </script>
 </head>
 <body>
   <!-- ===================== NAV ===================== -->
@@ -42,6 +128,7 @@
         <a href="#benchmark" data-i18n="nav.benchmark">Benchmarks</a>
         <a href="#compare" data-i18n="nav.compare">Compare</a>
         <a href="#quickstart" data-i18n="nav.quickstart">Quickstart</a>
+        <a href="#faq" data-i18n="nav.faq">FAQ</a>
         <a href="https://github.com/genideas-labs/supalite">GitHub</a>
       </nav>
       <div class="lang" role="group" aria-label="Language">
@@ -364,6 +451,47 @@ await client.transaction(async (tx) =&gt; {
         <p class="quickstart__more">
           <a class="btn btn--primary" href="https://github.com/genideas-labs/supalite#readme" data-i18n="quickstart.docs">Read the full docs →</a>
         </p>
+      </div>
+    </section>
+
+    <!-- ===================== FAQ ===================== -->
+    <section class="section" id="faq">
+      <div class="container container--narrow">
+        <h2 class="section__title" data-i18n="faq.heading">Frequently asked questions</h2>
+        <div class="faq">
+          <details class="faq__item">
+            <summary data-i18n="faq.q1">What is SupaLite?</summary>
+            <div class="faq__a" data-i18n="faq.a1">SupaLite is a lightweight TypeScript PostgreSQL client with a Supabase-style query builder. It keeps the familiar <code>.from().select().eq()</code> API but talks directly to Postgres, so you get the query builder, RPC, and transactions with less overhead than the supabase-js REST client. MIT licensed, on npm as <code>supalite</code>.</div>
+          </details>
+          <details class="faq__item">
+            <summary data-i18n="faq.q2">Is SupaLite faster than supabase-js?</summary>
+            <div class="faq__a" data-i18n="faq.a2">Yes, for database queries. supabase-js goes through the REST/PostgREST HTTP layer; SupaLite connects directly to Postgres. In a same-machine benchmark (identical query, 300 iterations) SupaLite's p50 latency was ~0.24 ms vs ~1.0 ms for supabase-js — about 4× lower — putting it in the same tier as Drizzle and Prisma. Cloud deployments add network hops on top, widening the gap.</div>
+          </details>
+          <details class="faq__item">
+            <summary data-i18n="faq.q3">Does SupaLite support transactions?</summary>
+            <div class="faq__a" data-i18n="faq.a3">Yes. SupaLite provides concurrency-safe transactions via <code>client.transaction(async (tx) =&gt; { ... })</code>, which the Supabase client does not support. Each call runs on its own pooled connection, commits on success, and rolls back on error.</div>
+          </details>
+          <details class="faq__item">
+            <summary data-i18n="faq.q4">How does SupaLite handle 64-bit integers (BIGINT)?</summary>
+            <div class="faq__a" data-i18n="faq.a4">PostgreSQL <code>BIGINT</code> can exceed JavaScript's safe integer limit (2<sup>53</sup>-1). SupaLite's <code>bigintTransform</code> defaults to <code>'number-or-string'</code>: a number when safe, a string when not — precise and JSON-serializable. supabase-js returns a JSON number and loses precision; Prisma and Drizzle return a BigInt that throws on <code>JSON.stringify</code>.</div>
+          </details>
+          <details class="faq__item">
+            <summary data-i18n="faq.q5">SupaLite vs Prisma vs Drizzle — which should I use?</summary>
+            <div class="faq__a" data-i18n="faq.a5">SupaLite is a thin, SQL-close query layer with Supabase ergonomics — pick it when you want minimal abstraction or are migrating off Supabase and handle migrations separately. Pick Prisma or Drizzle when you want schema-first modeling and built-in migrations. All three connect directly to Postgres and perform similarly; SupaLite adds JSON-safe BIGINT handling by default.</div>
+          </details>
+          <details class="faq__item">
+            <summary data-i18n="faq.q6">Does SupaLite support auth, storage, or realtime?</summary>
+            <div class="faq__a" data-i18n="faq.a6">No. SupaLite focuses on the database layer (query builder, RPC, transactions). For auth, storage, or realtime, keep using supabase-js or dedicated services (Cognito/Google Identity, S3/GCS, a pub/sub or LISTEN/NOTIFY gateway).</div>
+          </details>
+          <details class="faq__item">
+            <summary data-i18n="faq.q7">Can I migrate from Supabase to SupaLite?</summary>
+            <div class="faq__a" data-i18n="faq.a7">Yes. SupaLite mirrors the Supabase query-builder API, so most <code>.from().select()</code> queries work unchanged. It replaces only the DB query layer — you'll still need alternatives for auth/storage/realtime. It also includes <code>supalite gen types</code> for Supabase-compatible type generation.</div>
+          </details>
+          <details class="faq__item">
+            <summary data-i18n="faq.q8">How do I install SupaLite?</summary>
+            <div class="faq__a" data-i18n="faq.a8">Run <code>npm install supalite</code>. It's an MIT-licensed npm package that works with any PostgreSQL database. Connect with <code>new SupaLitePG({ connectionString })</code> and query with the Supabase-style builder.</div>
+          </details>
+        </div>
       </div>
     </section>
   </main>

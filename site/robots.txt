@@ -1,0 +1,43 @@
+# SupaLite — all crawlers welcome, including AI/LLM crawlers.
+# NOTE: robots.txt is only honored at the HOST root. On a GitHub Pages project
+# subpath (genideas-labs.github.io/supalite/) crawlers read the host-root
+# robots.txt instead, so this file takes full effect once a custom domain is set.
+
+User-agent: *
+Allow: /
+
+# Explicitly welcome AI / answer-engine crawlers
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+Sitemap: https://genideas-labs.github.io/supalite/sitemap.xml

@@ -248,6 +248,27 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .bigint__note { max-width: 780px; margin: 18px auto 0; color: var(--muted); font-size: 0.9rem; line-height: 1.7; }
 .bigint__note code { color: var(--accent); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; }
 
+/* ===================== FAQ ===================== */
+.container--narrow { max-width: 760px; }
+.faq { margin-top: 40px; display: grid; gap: 12px; }
+.faq__item {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 4px 20px;
+}
+.faq__item summary {
+  cursor: pointer; padding: 16px 0; font-weight: 600; font-size: 1.02rem; list-style: none;
+  display: flex; justify-content: space-between; align-items: center; gap: 16px;
+}
+.faq__item summary::-webkit-details-marker { display: none; }
+.faq__item summary::after {
+  content: "+"; color: var(--accent); font-size: 1.5rem; font-weight: 400; line-height: 1;
+  transition: transform .2s ease; flex: none;
+}
+.faq__item[open] summary::after { transform: rotate(45deg); }
+.faq__item summary:hover { color: var(--accent); }
+.faq__a { padding: 0 0 18px; color: var(--muted); font-size: 0.96rem; line-height: 1.7; }
+.faq__a code { color: var(--accent); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; font-size: 0.86em; }
+
 /* ===================== Responsive ===================== */
 @media (max-width: 860px) {
   .grid { grid-template-columns: repeat(2, 1fr); }
