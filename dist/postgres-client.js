@@ -167,8 +167,17 @@ class RpcBuilder {
 exports.RpcBuilder = RpcBuilder;
 _a = Symbol.toStringTag;
 RpcBuilder.returnTypeCache = new Map();
+/**
+ * Internal one-shot channel: createTransactionScope() sets this so the next
+ * SupaLitePG constructor skips the process-global pg.types.setTypeParser setup
+ * (the owning client already configured it). Set and reset synchronously around
+ * `new SupaLitePG` — there is no await between assignment and construction, so
+ * concurrent transaction() calls cannot race on it. Kept out of the public
+ * constructor signature so the published type surface is unchanged.
+ */
+let skipNextTypeParserSetup = false;
 class SupaLitePG {
-    constructor(config, internalOptions) {
+    constructor(config) {
         this.client = null;
         this.isTransaction = false;
         this.schemaCache = new Map(); // schemaName.tableName -> Map<columnName, pgDataType>
@@ -185,7 +194,7 @@ class SupaLitePG {
         // bigintTransform; re-running setTypeParser() on every transaction() would
         // re-assert it process-wide and could flip BIGINT parsing for another
         // SupaLitePG instance in the same process using a different bigintTransform.
-        if (!internalOptions?.skipTypeParserSetup)
+        if (!skipNextTypeParserSetup)
             switch (this.bigintTransform) {
                 case 'string':
                     pg_1.types.setTypeParser(20, (val) => val === null ? null : val); // pg는 이미 문자열로 줌
@@ -340,16 +349,23 @@ class SupaLitePG {
      * is shared and not owned (no error listener is attached — see constructor).
      */
     createTransactionScope() {
-        const scope = new SupaLitePG({
-            pool: this.pool,
-            schema: this.schema,
-            bigintTransform: this.bigintTransform,
-            verbose: this.verbose,
-        }, 
-        // Reuse the global type parser the owning client already configured; do
-        // not re-run the constructor's process-global setTypeParser side effects
-        // for every transaction (would risk flipping BIGINT parsing elsewhere).
-        { skipTypeParserSetup: true });
+        // Reuse the global type parser the owning client already configured; the
+        // constructor reads this flag to skip re-running setTypeParser (a
+        // process-global side effect) for every transaction. Reset in finally so a
+        // construction failure can't leave the flag set for the next instance.
+        skipNextTypeParserSetup = true;
+        let scope;
+        try {
+            scope = new SupaLitePG({
+                pool: this.pool,
+                schema: this.schema,
+                bigintTransform: this.bigintTransform,
+                verbose: this.verbose,
+            });
+        }
+        finally {
+            skipNextTypeParserSetup = false;
+        }
         // Share the read-mostly metadata caches so each transaction doesn't cold-populate
         // information_schema. Safe: caches are append-only after the first miss, and JS is
         // single-threaded (no torn writes across awaits).
