@@ -230,7 +230,7 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
   private bigintTransform: BigintTransformType;
   private ownsPool: boolean = true;
 
-  constructor(config?: SupaliteConfig) {
+  constructor(config?: SupaliteConfig, internalOptions?: { skipTypeParserSetup?: boolean }) {
     this.verbose = config?.verbose || process.env.SUPALITE_VERBOSE === 'true' || false;
     this.bigintTransform = config?.bigintTransform || 'number-or-string'; // 기본값 'number-or-string'
 
@@ -238,7 +238,12 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
       console.log(`[SupaLite VERBOSE] BIGINT transform mode set to: '${this.bigintTransform}'`);
     }
 
-    // 타입 파서 설정
+    // 타입 파서 설정 (process-global). Skipped for isolated transaction scopes —
+    // the owning client already configured the global parser for this
+    // bigintTransform; re-running setTypeParser() on every transaction() would
+    // re-assert it process-wide and could flip BIGINT parsing for another
+    // SupaLitePG instance in the same process using a different bigintTransform.
+    if (!internalOptions?.skipTypeParserSetup)
     switch (this.bigintTransform) {
       case 'string':
         types.setTypeParser(20, (val: string | null) => val === null ? null : val); // pg는 이미 문자열로 줌
@@ -402,12 +407,18 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
    * is shared and not owned (no error listener is attached — see constructor).
    */
   private createTransactionScope(): SupaLitePG<T> {
-    const scope = new SupaLitePG<T>({
-      pool: this.pool,
-      schema: this.schema,
-      bigintTransform: this.bigintTransform,
-      verbose: this.verbose,
-    });
+    const scope = new SupaLitePG<T>(
+      {
+        pool: this.pool,
+        schema: this.schema,
+        bigintTransform: this.bigintTransform,
+        verbose: this.verbose,
+      },
+      // Reuse the global type parser the owning client already configured; do
+      // not re-run the constructor's process-global setTypeParser side effects
+      // for every transaction (would risk flipping BIGINT parsing elsewhere).
+      { skipTypeParserSetup: true },
+    );
     // Share the read-mostly metadata caches so each transaction doesn't cold-populate
     // information_schema. Safe: caches are append-only after the first miss, and JS is
     // single-threaded (no torn writes across awaits).

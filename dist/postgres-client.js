@@ -168,7 +168,7 @@ exports.RpcBuilder = RpcBuilder;
 _a = Symbol.toStringTag;
 RpcBuilder.returnTypeCache = new Map();
 class SupaLitePG {
-    constructor(config) {
+    constructor(config, internalOptions) {
         this.client = null;
         this.isTransaction = false;
         this.schemaCache = new Map(); // schemaName.tableName -> Map<columnName, pgDataType>
@@ -180,43 +180,48 @@ class SupaLitePG {
         if (this.verbose) {
             console.log(`[SupaLite VERBOSE] BIGINT transform mode set to: '${this.bigintTransform}'`);
         }
-        // 타입 파서 설정
-        switch (this.bigintTransform) {
-            case 'string':
-                pg_1.types.setTypeParser(20, (val) => val === null ? null : val); // pg는 이미 문자열로 줌
-                break;
-            case 'number':
-                pg_1.types.setTypeParser(20, (val) => {
-                    if (val === null)
-                        return null;
-                    const num = Number(val);
-                    if (this.verbose && (num > Number.MAX_SAFE_INTEGER || num < Number.MIN_SAFE_INTEGER)) {
-                        console.warn(`[SupaLite VERBOSE WARNING] BIGINT value ${val} converted to Number might lose precision. ` +
-                            `Max safe integer is ${Number.MAX_SAFE_INTEGER}.`);
-                    }
-                    return num;
-                });
-                break;
-            case 'number-or-string':
-                pg_1.types.setTypeParser(20, (val) => {
-                    if (val === null)
-                        return null;
-                    const bigValue = BigInt(val);
-                    if (bigValue > MAX_SAFE_BIGINT || bigValue < MIN_SAFE_BIGINT) {
-                        if (this.verbose) {
-                            console.warn(`[SupaLite VERBOSE WARNING] BIGINT value ${val} exceeds safe integer range; ` +
-                                'returning string to preserve precision.');
+        // 타입 파서 설정 (process-global). Skipped for isolated transaction scopes —
+        // the owning client already configured the global parser for this
+        // bigintTransform; re-running setTypeParser() on every transaction() would
+        // re-assert it process-wide and could flip BIGINT parsing for another
+        // SupaLitePG instance in the same process using a different bigintTransform.
+        if (!internalOptions?.skipTypeParserSetup)
+            switch (this.bigintTransform) {
+                case 'string':
+                    pg_1.types.setTypeParser(20, (val) => val === null ? null : val); // pg는 이미 문자열로 줌
+                    break;
+                case 'number':
+                    pg_1.types.setTypeParser(20, (val) => {
+                        if (val === null)
+                            return null;
+                        const num = Number(val);
+                        if (this.verbose && (num > Number.MAX_SAFE_INTEGER || num < Number.MIN_SAFE_INTEGER)) {
+                            console.warn(`[SupaLite VERBOSE WARNING] BIGINT value ${val} converted to Number might lose precision. ` +
+                                `Max safe integer is ${Number.MAX_SAFE_INTEGER}.`);
                         }
-                        return val;
-                    }
-                    return Number(val);
-                });
-                break;
-            case 'bigint':
-            default: // 기본값 및 'bigint' 명시 시
-                pg_1.types.setTypeParser(20, (val) => val === null ? null : BigInt(val));
-                break;
-        }
+                        return num;
+                    });
+                    break;
+                case 'number-or-string':
+                    pg_1.types.setTypeParser(20, (val) => {
+                        if (val === null)
+                            return null;
+                        const bigValue = BigInt(val);
+                        if (bigValue > MAX_SAFE_BIGINT || bigValue < MIN_SAFE_BIGINT) {
+                            if (this.verbose) {
+                                console.warn(`[SupaLite VERBOSE WARNING] BIGINT value ${val} exceeds safe integer range; ` +
+                                    'returning string to preserve precision.');
+                            }
+                            return val;
+                        }
+                        return Number(val);
+                    });
+                    break;
+                case 'bigint':
+                default: // 기본값 및 'bigint' 명시 시
+                    pg_1.types.setTypeParser(20, (val) => val === null ? null : BigInt(val));
+                    break;
+            }
         this.schema = config?.schema || 'public';
         if (config?.pool) {
             this.pool = config.pool;
@@ -340,7 +345,11 @@ class SupaLitePG {
             schema: this.schema,
             bigintTransform: this.bigintTransform,
             verbose: this.verbose,
-        });
+        }, 
+        // Reuse the global type parser the owning client already configured; do
+        // not re-run the constructor's process-global setTypeParser side effects
+        // for every transaction (would risk flipping BIGINT parsing elsewhere).
+        { skipTypeParserSetup: true });
         // Share the read-mostly metadata caches so each transaction doesn't cold-populate
         // information_schema. Safe: caches are append-only after the first miss, and JS is
         // single-threaded (no torn writes across awaits).

@@ -55,7 +55,9 @@ export declare class SupaLitePG<T extends {
     verbose: boolean;
     private bigintTransform;
     private ownsPool;
-    constructor(config?: SupaliteConfig);
+    constructor(config?: SupaliteConfig, internalOptions?: {
+        skipTypeParserSetup?: boolean;
+    });
     /**
      * @deprecated Manual transaction control mutates this instance and is NOT
      * concurrency-safe. Use `transaction(cb)` instead.

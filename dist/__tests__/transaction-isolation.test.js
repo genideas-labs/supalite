@@ -105,6 +105,17 @@ describe('transaction isolation (concurrency-safe scope)', () => {
         expect(c.sql).toEqual(['BEGIN', 'COMMIT']);
         expect(c.release).toHaveBeenCalledTimes(1);
     });
+    it('does not re-run the process-global BIGINT type parser when creating a transaction scope', async () => {
+        const c = makeClient();
+        poolConnect().mockResolvedValueOnce(c);
+        const setTypeParser = pgMock.types.setTypeParser;
+        const client = new postgres_client_1.SupaLitePG({ connectionString: 'postgresql://mock' });
+        const callsAfterConstruct = setTypeParser.mock.calls.length;
+        await client.transaction(async () => undefined);
+        // The scope reuses the global parser the owner already set; re-running it
+        // per transaction could flip BIGINT parsing for other clients in the process.
+        expect(setTypeParser.mock.calls.length).toBe(callsAfterConstruct);
+    });
     it('shares read-mostly metadata caches between parent and transaction scope', async () => {
         const c = makeClient();
         poolConnect().mockResolvedValueOnce(c);
