@@ -1009,6 +1009,10 @@ await client.transaction(async (tx) => {
 });
 ```
 
+`transaction(cb)` runs the callback on an **isolated, connection-bound scope**. Each call checks out its own pooled connection, so concurrent `transaction(cb)` calls on the same client never interfere, and plain (non-transactional) queries keep using the pool. The transaction commits if the callback resolves and rolls back if it throws — a rollback failure never masks the original error, and the connection is always returned to the pool.
+
+> Use `transaction(cb)` rather than manual `begin()` / `commit()` / `rollback()`. The manual methods mutate the client instance and are **not** concurrency-safe (kept for backward compatibility, deprecated).
+
 ### Connection check
 
 ```typescript
@@ -1062,10 +1066,10 @@ await client.close();
 
 ### Transaction methods
 
-- `transaction<T>(callback: (client: SupaLitePG) => Promise<T>)`
-- `begin()`
-- `commit()`
-- `rollback()`
+- `transaction<T>(callback: (client: SupaLitePG) => Promise<T>)` — concurrency-safe; runs on an isolated scope, commits on success, rolls back on throw
+- `begin()` — _deprecated_: mutates the instance and is not concurrency-safe; use `transaction(cb)`
+- `commit()` — _deprecated_: use `transaction(cb)`
+- `rollback()` — _deprecated_: use `transaction(cb)`
 
 ### Client methods
 

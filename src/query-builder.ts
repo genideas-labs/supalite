@@ -223,7 +223,7 @@ export class QueryBuilder<
   }
 
   private unescapeOrValue(value: string): string {
-    return value.replace(/\\([\\\".,])/g, '$1');
+    return value.replace(/\\([\\".,])/g, '$1');
   }
 
   private normalizeOrLiteralValue(value: string): any {

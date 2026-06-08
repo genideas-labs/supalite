@@ -167,6 +167,15 @@ class RpcBuilder {
 exports.RpcBuilder = RpcBuilder;
 _a = Symbol.toStringTag;
 RpcBuilder.returnTypeCache = new Map();
+/**
+ * Internal one-shot channel: createTransactionScope() sets this so the next
+ * SupaLitePG constructor skips the process-global pg.types.setTypeParser setup
+ * (the owning client already configured it). Set and reset synchronously around
+ * `new SupaLitePG` — there is no await between assignment and construction, so
+ * concurrent transaction() calls cannot race on it. Kept out of the public
+ * constructor signature so the published type surface is unchanged.
+ */
+let skipNextTypeParserSetup = false;
 class SupaLitePG {
     constructor(config) {
         this.client = null;
@@ -180,43 +189,48 @@ class SupaLitePG {
         if (this.verbose) {
             console.log(`[SupaLite VERBOSE] BIGINT transform mode set to: '${this.bigintTransform}'`);
         }
-        // 타입 파서 설정
-        switch (this.bigintTransform) {
-            case 'string':
-                pg_1.types.setTypeParser(20, (val) => val === null ? null : val); // pg는 이미 문자열로 줌
-                break;
-            case 'number':
-                pg_1.types.setTypeParser(20, (val) => {
-                    if (val === null)
-                        return null;
-                    const num = Number(val);
-                    if (this.verbose && (num > Number.MAX_SAFE_INTEGER || num < Number.MIN_SAFE_INTEGER)) {
-                        console.warn(`[SupaLite VERBOSE WARNING] BIGINT value ${val} converted to Number might lose precision. ` +
-                            `Max safe integer is ${Number.MAX_SAFE_INTEGER}.`);
-                    }
-                    return num;
-                });
-                break;
-            case 'number-or-string':
-                pg_1.types.setTypeParser(20, (val) => {
-                    if (val === null)
-                        return null;
-                    const bigValue = BigInt(val);
-                    if (bigValue > MAX_SAFE_BIGINT || bigValue < MIN_SAFE_BIGINT) {
-                        if (this.verbose) {
-                            console.warn(`[SupaLite VERBOSE WARNING] BIGINT value ${val} exceeds safe integer range; ` +
-                                'returning string to preserve precision.');
+        // 타입 파서 설정 (process-global). Skipped for isolated transaction scopes —
+        // the owning client already configured the global parser for this
+        // bigintTransform; re-running setTypeParser() on every transaction() would
+        // re-assert it process-wide and could flip BIGINT parsing for another
+        // SupaLitePG instance in the same process using a different bigintTransform.
+        if (!skipNextTypeParserSetup)
+            switch (this.bigintTransform) {
+                case 'string':
+                    pg_1.types.setTypeParser(20, (val) => val === null ? null : val); // pg는 이미 문자열로 줌
+                    break;
+                case 'number':
+                    pg_1.types.setTypeParser(20, (val) => {
+                        if (val === null)
+                            return null;
+                        const num = Number(val);
+                        if (this.verbose && (num > Number.MAX_SAFE_INTEGER || num < Number.MIN_SAFE_INTEGER)) {
+                            console.warn(`[SupaLite VERBOSE WARNING] BIGINT value ${val} converted to Number might lose precision. ` +
+                                `Max safe integer is ${Number.MAX_SAFE_INTEGER}.`);
                         }
-                        return val;
-                    }
-                    return Number(val);
-                });
-                break;
-            case 'bigint':
-            default: // 기본값 및 'bigint' 명시 시
-                pg_1.types.setTypeParser(20, (val) => val === null ? null : BigInt(val));
-                break;
-        }
+                        return num;
+                    });
+                    break;
+                case 'number-or-string':
+                    pg_1.types.setTypeParser(20, (val) => {
+                        if (val === null)
+                            return null;
+                        const bigValue = BigInt(val);
+                        if (bigValue > MAX_SAFE_BIGINT || bigValue < MIN_SAFE_BIGINT) {
+                            if (this.verbose) {
+                                console.warn(`[SupaLite VERBOSE WARNING] BIGINT value ${val} exceeds safe integer range; ` +
+                                    'returning string to preserve precision.');
+                            }
+                            return val;
+                        }
+                        return Number(val);
+                    });
+                    break;
+                case 'bigint':
+                default: // 기본값 및 'bigint' 명시 시
+                    pg_1.types.setTypeParser(20, (val) => val === null ? null : BigInt(val));
+                    break;
+            }
         this.schema = config?.schema || 'public';
         if (config?.pool) {
             this.pool = config.pool;
@@ -264,49 +278,136 @@ class SupaLitePG {
             }
             this.pool = new pg_1.Pool(poolConfigOptions);
         }
-        // Error handling
-        this.pool.on('error', (err) => {
-            console.error('[SupaLite ERROR] Unexpected error on idle client', err);
-            // Consider if process.exit is too drastic for a library. Maybe re-throw or emit an event.
-            // process.exit(-1); 
-        });
+        // Error handling — only manage listeners on a pool we own. For an external
+        // pool (ownsPool=false) the caller owns its lifecycle and error handling;
+        // attaching here would leak a listener per constructed/forked client.
+        if (this.ownsPool) {
+            this.pool.on('error', (err) => {
+                console.error('[SupaLite ERROR] Unexpected error on idle client', err);
+            });
+        }
     }
+    /**
+     * @deprecated Manual transaction control mutates this instance and is NOT
+     * concurrency-safe. Use `transaction(cb)` instead.
+     */
     // 트랜잭션 시작
     async begin() {
         if (!this.client) {
             this.client = await this.pool.connect();
         }
-        await this.client.query('BEGIN');
-        this.isTransaction = true;
+        try {
+            await this.client.query('BEGIN');
+            this.isTransaction = true;
+        }
+        catch (err) {
+            // BEGIN failed: release the just-acquired connection so it doesn't leak
+            // (isTransaction is still false, so commit()/rollback() won't release it).
+            // Hand the error to release() so pg discards a possibly-broken connection
+            // (reset/timeout) instead of returning it to the pool for reuse.
+            this.client.release(err);
+            this.client = null;
+            throw err;
+        }
     }
+    /**
+     * @deprecated Manual transaction control mutates this instance and is NOT
+     * concurrency-safe. Use `transaction(cb)` instead, which runs on an isolated scope.
+     */
     // 트랜잭션 커밋
     async commit() {
         if (this.isTransaction && this.client) {
-            await this.client.query('COMMIT');
-            this.client.release();
-            this.client = null;
-            this.isTransaction = false;
+            let commitError;
+            try {
+                await this.client.query('COMMIT');
+            }
+            catch (err) {
+                commitError = err;
+                throw err;
+            }
+            finally {
+                // On COMMIT failure the connection may be in an unknown state — pass the
+                // error to release() so pg discards it instead of reusing a broken client.
+                this.client.release(commitError);
+                this.client = null;
+                this.isTransaction = false;
+            }
         }
     }
+    /**
+     * @deprecated Manual transaction control mutates this instance and is NOT
+     * concurrency-safe. Use `transaction(cb)` instead, which runs on an isolated scope.
+     */
     // 트랜잭션 롤백
     async rollback() {
         if (this.isTransaction && this.client) {
-            await this.client.query('ROLLBACK');
-            this.client.release();
-            this.client = null;
-            this.isTransaction = false;
+            let rollbackError;
+            try {
+                await this.client.query('ROLLBACK');
+            }
+            catch (err) {
+                rollbackError = err;
+                throw err;
+            }
+            finally {
+                // On ROLLBACK failure the connection may be in an unknown state — pass the
+                // error to release() so pg discards it instead of reusing a broken client.
+                this.client.release(rollbackError);
+                this.client = null;
+                this.isTransaction = false;
+            }
         }
     }
-    // 트랜잭션 실행
-    async transaction(callback) {
-        await this.begin();
+    /**
+     * Creates an isolated SupaLitePG bound to the SAME pool but with independent
+     * transaction state (its own `client`/`isTransaction`). Used by transaction()
+     * so concurrent transactions never collide on shared instance state. The pool
+     * is shared and not owned (no error listener is attached — see constructor).
+     */
+    createTransactionScope() {
+        // Reuse the global type parser the owning client already configured; the
+        // constructor reads this flag to skip re-running setTypeParser (a
+        // process-global side effect) for every transaction. Reset in finally so a
+        // construction failure can't leave the flag set for the next instance.
+        skipNextTypeParserSetup = true;
+        let scope;
         try {
-            const result = await callback(this);
-            await this.commit();
+            scope = new SupaLitePG({
+                pool: this.pool,
+                schema: this.schema,
+                bigintTransform: this.bigintTransform,
+                verbose: this.verbose,
+            });
+        }
+        finally {
+            skipNextTypeParserSetup = false;
+        }
+        // Share the read-mostly metadata caches so each transaction doesn't cold-populate
+        // information_schema. Safe: caches are append-only after the first miss, and JS is
+        // single-threaded (no torn writes across awaits).
+        scope.schemaCache = this.schemaCache;
+        scope.foreignKeyCache = this.foreignKeyCache;
+        return scope;
+    }
+    // 트랜잭션 실행 (concurrency-safe: isolated scope per call)
+    async transaction(callback) {
+        const tx = this.createTransactionScope();
+        await tx.begin();
+        try {
+            const result = await callback(tx);
+            await tx.commit();
             return result;
         }
         catch (error) {
-            await this.rollback();
+            // Roll back, but never let a rollback failure mask the original error.
+            try {
+                await tx.rollback();
+            }
+            catch (rollbackError) {
+                if (this.verbose) {
+                    console.error('[SupaLite] rollback failed after a transaction error', rollbackError);
+                }
+            }
             throw error;
         }
     }

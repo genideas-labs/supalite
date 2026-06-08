@@ -135,7 +135,9 @@ Notes:
   - `'number-or-string'`: `Number` when safe, otherwise string to preserve precision.
 
 ## 6. Transactions
-- `begin`, `commit`, `rollback`, and `transaction` are implemented on `SupaLitePG`.
+- `transaction(cb)` is the supported API. It forks an isolated, connection-bound scope (its own `client`/`isTransaction`) so concurrent transactions on one `SupaLitePG` never collide on shared instance state; the scope shares the parent's pool and read-mostly metadata caches and does not re-run the process-global type-parser setup.
+- The scope checks out a dedicated pooled connection on `begin`, commits when the callback resolves, rolls back when it throws (a rollback failure never masks the original error), and always returns the connection to the pool.
+- Manual `begin`, `commit`, `rollback` remain on `SupaLitePG` for backward compatibility but are **deprecated**: they mutate the instance and are not concurrency-safe. `commit`/`rollback` release the connection in `finally`, and a failed `begin` releases the just-acquired connection.
 - Metadata lookups (schema/foreign keys) use the transaction client when active.
 - Query execution uses the transaction client when active so all statements in a transaction share the same connection.
 

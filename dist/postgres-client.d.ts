@@ -56,9 +56,28 @@ export declare class SupaLitePG<T extends {
     private bigintTransform;
     private ownsPool;
     constructor(config?: SupaliteConfig);
+    /**
+     * @deprecated Manual transaction control mutates this instance and is NOT
+     * concurrency-safe. Use `transaction(cb)` instead.
+     */
     begin(): Promise<void>;
+    /**
+     * @deprecated Manual transaction control mutates this instance and is NOT
+     * concurrency-safe. Use `transaction(cb)` instead, which runs on an isolated scope.
+     */
     commit(): Promise<void>;
+    /**
+     * @deprecated Manual transaction control mutates this instance and is NOT
+     * concurrency-safe. Use `transaction(cb)` instead, which runs on an isolated scope.
+     */
     rollback(): Promise<void>;
+    /**
+     * Creates an isolated SupaLitePG bound to the SAME pool but with independent
+     * transaction state (its own `client`/`isTransaction`). Used by transaction()
+     * so concurrent transactions never collide on shared instance state. The pool
+     * is shared and not owned (no error listener is attached — see constructor).
+     */
+    private createTransactionScope;
     transaction<R>(callback: (client: SupaLitePG<T>) => Promise<R>): Promise<R>;
     getQueryClient(): Pool | PoolClient;
     from<K extends TableOrViewName<T, 'public'>>(table: K): QueryBuilder<T, 'public', K> & Promise<QueryResult<Row<T, 'public', K>>> & {
