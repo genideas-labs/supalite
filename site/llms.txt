@@ -1,0 +1,33 @@
+# SupaLite
+
+> SupaLite is a lightweight TypeScript PostgreSQL client with a Supabase-style query builder. It keeps the familiar `.from().select().eq()` API but connects directly to Postgres, giving you query builder, RPC, and transactions with less overhead than the supabase-js REST client. MIT licensed; install with `npm install supalite`.
+
+## Key facts
+
+- **Faster than supabase-js for queries.** supabase-js goes through the REST/PostgREST HTTP layer; SupaLite connects directly to Postgres. Same-machine benchmark (identical query, 300 iterations): SupaLite p50 ~0.24 ms vs supabase-js ~1.0 ms — about 4× lower — same tier as Drizzle and Prisma. Cloud deployments add network hops on top.
+- **Concurrency-safe transactions** via `client.transaction(async (tx) => { ... })`. The Supabase client does not support transactions.
+- **JSON-safe 64-bit BIGINT.** `bigintTransform` defaults to `'number-or-string'`: a number when within JS safe-integer range, a string when not — precise and JSON-serializable. supabase-js loses precision (returns a JSON number); Prisma and Drizzle return a BigInt that throws on `JSON.stringify`.
+- **Scope:** query builder + RPC + transactions. It does NOT provide auth, storage, or realtime — use supabase-js or dedicated services for those.
+- **Type generation:** `supalite gen types` produces TypeScript types, with byte-for-byte Supabase CLI-compatible output on demand.
+- Works with any PostgreSQL database. Requires Node.js >= 16.17.
+
+## When to use SupaLite
+
+- You want a thin, SQL-close query layer with Supabase ergonomics.
+- You are migrating off Supabase and want to keep the query syntax.
+- You need transactions or JSON-safe bigints that supabase-js doesn't give you.
+- Prefer Prisma or Drizzle instead if you want schema-first modeling and built-in migrations.
+
+## Links
+
+- [README (full API and usage)](https://github.com/genideas-labs/supalite#readme)
+- [Korean README](https://github.com/genideas-labs/supalite/blob/main/README.ko.md)
+- [npm package](https://www.npmjs.com/package/supalite)
+- [Benchmarks (reproducible latency + bigint tests)](https://github.com/genideas-labs/supalite/tree/main/benchmarks)
+- [Homepage](https://genideas-labs.github.io/supalite/)
+
+## Install
+
+```
+npm install supalite
+```

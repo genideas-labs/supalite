@@ -78,7 +78,26 @@
     'bigint.v.throws': '✗ JSON.stringify가 throw',
     'bigint.v.poison': '✗ 양쪽 다 함정',
     'bigint.v.safe': '✓ 정밀 & JSON-safe',
-    'bigint.note': "supalite의 <code>bigintTransform</code> 기본값은 <code>'number-or-string'</code> — 안전하게 들어가면 number, 아니면 string으로 반환합니다. 그래서 정밀하면서 <em>동시에</em> <code>JSON.stringify</code>를 통과합니다. 설정 없이 기본 동작이며, 클라이언트별로 조정 가능합니다."
+    'bigint.note': "supalite의 <code>bigintTransform</code> 기본값은 <code>'number-or-string'</code> — 안전하게 들어가면 number, 아니면 string으로 반환합니다. 그래서 정밀하면서 <em>동시에</em> <code>JSON.stringify</code>를 통과합니다. 설정 없이 기본 동작이며, 클라이언트별로 조정 가능합니다.",
+
+    'nav.faq': 'FAQ',
+    'faq.heading': '자주 묻는 질문',
+    'faq.q1': 'SupaLite가 뭔가요?',
+    'faq.a1': 'SupaLite는 Supabase 스타일 쿼리 빌더를 가진 가벼운 TypeScript PostgreSQL 클라이언트입니다. 익숙한 <code>.from().select().eq()</code> API를 유지하면서 Postgres에 직접 연결해, supabase-js REST 클라이언트보다 적은 오버헤드로 쿼리 빌더·RPC·트랜잭션을 제공합니다. MIT 라이선스, npm에서 <code>supalite</code>.',
+    'faq.q2': 'SupaLite가 supabase-js보다 빠른가요?',
+    'faq.a2': '데이터베이스 쿼리에서는 네. supabase-js는 REST/PostgREST HTTP 계층을 거치지만 SupaLite는 Postgres에 직접 연결합니다. 같은 머신·동일 쿼리·300회 측정에서 SupaLite의 p50은 ~0.24ms, supabase-js는 ~1.0ms로 약 4× 낮았고, Drizzle·Prisma와 같은 티어입니다. 클라우드 배포는 네트워크 홉이 더해져 차이가 더 벌어집니다.',
+    'faq.q3': 'SupaLite는 트랜잭션을 지원하나요?',
+    'faq.a3': '네. <code>client.transaction(async (tx) =&gt; { ... })</code>로 동시성에 안전한 트랜잭션을 제공합니다 — Supabase 클라이언트는 지원하지 않습니다. 각 호출이 자체 풀 커넥션에서 실행되고, 성공하면 커밋·실패하면 롤백합니다.',
+    'faq.q4': 'SupaLite는 64비트 정수(BIGINT)를 어떻게 처리하나요?',
+    'faq.a4': "PostgreSQL <code>BIGINT</code>는 JavaScript 안전 정수 한계(2<sup>53</sup>-1)를 넘을 수 있습니다. SupaLite의 <code>bigintTransform</code> 기본값 <code>'number-or-string'</code>은 안전하면 number, 아니면 string으로 반환해 정밀하고 JSON 직렬화도 됩니다. supabase-js는 JSON 숫자로 반환해 정밀도를 잃고, Prisma·Drizzle은 BigInt라 <code>JSON.stringify</code>에서 throw합니다.",
+    'faq.q5': 'SupaLite vs Prisma vs Drizzle, 뭘 써야 하나요?',
+    'faq.a5': 'SupaLite는 Supabase 사용성을 가진 얇고 SQL에 가까운 쿼리 계층입니다 — 최소 추상화를 원하거나 Supabase에서 이전하며 마이그레이션을 따로 처리할 때 적합합니다. 스키마 우선 모델링과 내장 마이그레이션을 원하면 Prisma나 Drizzle. 셋 다 Postgres에 직접 연결해 성능은 비슷하고, SupaLite는 JSON-safe BIGINT 처리를 기본 제공합니다.',
+    'faq.q6': 'SupaLite는 인증·스토리지·실시간을 지원하나요?',
+    'faq.a6': '아니요. SupaLite는 데이터베이스 계층(쿼리 빌더·RPC·트랜잭션)에 집중합니다. 인증·스토리지·실시간은 supabase-js나 전용 서비스(Cognito/Google Identity, S3/GCS, pub/sub 또는 LISTEN/NOTIFY 게이트웨이)를 쓰세요.',
+    'faq.q7': 'Supabase에서 SupaLite로 이전할 수 있나요?',
+    'faq.a7': '네. SupaLite는 Supabase 쿼리 빌더 API를 그대로 따라 대부분의 <code>.from().select()</code> 쿼리가 수정 없이 동작합니다. DB 쿼리 계층만 대체하므로 인증·스토리지·실시간은 대안이 필요합니다. Supabase 호환 타입 생성을 위한 <code>supalite gen types</code>도 포함합니다.',
+    'faq.q8': 'SupaLite는 어떻게 설치하나요?',
+    'faq.a8': "<code>npm install supalite</code>. 어떤 PostgreSQL과도 동작하는 MIT 라이선스 npm 패키지입니다. <code>new SupaLitePG({ connectionString })</code>로 연결하고 Supabase 스타일 빌더로 쿼리하세요."
   };
 
   var COPY_LABEL = { en: 'Copy', ko: '복사' };
