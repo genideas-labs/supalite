@@ -1,0 +1,17 @@
+// Minimal Prisma schema for the benchmark's supalite_bench table.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model supalite_bench {
+  id         Int      @id @default(autoincrement())
+  name       String
+  email      String
+  status     String
+  big        BigInt
+  created_at DateTime @default(now()) @db.Timestamptz
+}

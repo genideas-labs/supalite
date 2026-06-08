@@ -9,10 +9,18 @@
 
   <!-- Open Graph -->
   <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="SupaLite" />
   <meta property="og:title" content="SupaLite — Supabase-style queries, without the serverless latency" />
   <meta property="og:description" content="A lightweight TypeScript PostgreSQL client: query builder + RPC + transactions, with a smaller footprint than supabase-js." />
   <meta property="og:url" content="https://genideas-labs.github.io/supalite/" />
+  <meta property="og:image" content="https://genideas-labs.github.io/supalite/assets/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="SupaLite — Supabase-style queries, without the serverless latency. npm install supalite" />
   <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="SupaLite — Supabase-style queries, without the serverless latency" />
+  <meta name="twitter:description" content="A lightweight TypeScript PostgreSQL client: query builder + RPC + transactions." />
+  <meta name="twitter:image" content="https://genideas-labs.github.io/supalite/assets/og-image.png" />
 
   <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -31,6 +39,7 @@
       </a>
       <nav class="nav__links" aria-label="Primary">
         <a href="#features" data-i18n="nav.features">Features</a>
+        <a href="#benchmark" data-i18n="nav.benchmark">Benchmarks</a>
         <a href="#compare" data-i18n="nav.compare">Compare</a>
         <a href="#quickstart" data-i18n="nav.quickstart">Quickstart</a>
         <a href="https://github.com/genideas-labs/supalite">GitHub</a>
@@ -180,6 +189,78 @@
   .offset((page - 1) * 10);</code></pre>
             </div>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== BENCHMARK ===================== -->
+    <section class="section" id="benchmark">
+      <div class="container">
+        <h2 class="section__title" data-i18n="bench.heading">How much faster?</h2>
+        <p class="section__lead" data-i18n="bench.lead">Same database, same query, four clients. supabase-js pays the REST/PostgREST tax; the direct drivers don't — and supalite keeps Supabase's API while matching them. Median (p50) latency, lower is better:</p>
+
+        <div class="perf">
+          <div class="perf__row">
+            <div class="perf__head"><span class="perf__name">supabase-js <small data-i18n="bench.rest">REST</small></span><span class="perf__val">1.00 ms</span></div>
+            <div class="perf__track"><div class="perf__bar perf__bar--slow" style="width:100%"></div></div>
+          </div>
+          <div class="perf__row">
+            <div class="perf__head"><span class="perf__name">supalite <small data-i18n="bench.direct">direct</small></span><span class="perf__val">0.24 ms <b class="up">4.2&times;</b></span></div>
+            <div class="perf__track"><div class="perf__bar perf__bar--win" style="width:24%"></div></div>
+          </div>
+          <div class="perf__row">
+            <div class="perf__head"><span class="perf__name">Drizzle <small data-i18n="bench.direct">direct</small></span><span class="perf__val">0.28 ms <b class="up">3.6&times;</b></span></div>
+            <div class="perf__track"><div class="perf__bar" style="width:28%"></div></div>
+          </div>
+          <div class="perf__row">
+            <div class="perf__head"><span class="perf__name">Prisma <small data-i18n="bench.direct">direct</small></span><span class="perf__val">0.31 ms <b class="up">3.2&times;</b></span></div>
+            <div class="perf__track"><div class="perf__bar" style="width:31%"></div></div>
+          </div>
+        </div>
+
+        <p class="bench__note" data-i18n="bench.note"><strong>Methodology:</strong> local Supabase stack (PostgREST) vs direct Postgres, same machine, identical query (5 columns, <code>limit(20)</code>), 300 interleaved iterations after warmup. This isolates the HTTP/PostgREST API-layer overhead — real-world cloud deployments add network hops and cold starts on top, so the gap only widens. supalite, Drizzle, and Prisma all talk directly to Postgres, so they land in the same tier. Reproduce it in your own environment with <a href="https://github.com/genideas-labs/supalite/tree/main/benchmarks">benchmarks/</a> in the repo.</p>
+      </div>
+    </section>
+
+    <!-- ===================== BIGINT ===================== -->
+    <section class="section section--alt" id="bigint">
+      <div class="container">
+        <h2 class="section__title" data-i18n="bigint.heading">And your 64-bit IDs survive</h2>
+        <p class="section__lead" data-i18n="bigint.lead">PostgreSQL <code>BIGINT</code> reaches 9,223,372,036,854,775,807 — past JavaScript's safe integer limit (2<sup>53</sup>-1). Here's what each client actually returns for that exact value:</p>
+
+        <div class="bigint">
+          <table class="bigint__table">
+            <thead>
+              <tr>
+                <th data-i18n="bigint.th.client">client</th>
+                <th data-i18n="bigint.th.returns">value returned in JS</th>
+                <th data-i18n="bigint.th.verdict">result</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>supabase-js</td>
+                <td><code>9223372036854776000</code> <small data-i18n="bigint.t.number">(number)</small></td>
+                <td class="bad" data-i18n="bigint.v.corrupt">✗ silently wrong</td>
+              </tr>
+              <tr>
+                <td>Prisma</td>
+                <td><code>9223372036854775807n</code> <small data-i18n="bigint.t.bigint">(BigInt)</small></td>
+                <td class="bad" data-i18n="bigint.v.throws">✗ JSON.stringify throws</td>
+              </tr>
+              <tr>
+                <td>Drizzle</td>
+                <td><small data-i18n="bigint.t.drizzle">number → wrong, or BigInt → throws</small></td>
+                <td class="bad" data-i18n="bigint.v.poison">✗ pick your poison</td>
+              </tr>
+              <tr class="bigint__win">
+                <td>supalite</td>
+                <td><code>"9223372036854775807"</code> <small data-i18n="bigint.t.string">(string)</small></td>
+                <td class="good" data-i18n="bigint.v.safe">✓ precise &amp; JSON-safe</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="bigint__note" data-i18n="bigint.note">supalite's <code>bigintTransform</code> defaults to <code>'number-or-string'</code>: a plain number when the value fits safely, a string when it wouldn't — so it's precise <em>and</em> survives <code>JSON.stringify</code> with zero config. Configurable per client.</p>
         </div>
       </div>
     </section>
