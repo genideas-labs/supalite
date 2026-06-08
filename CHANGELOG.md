@@ -7,6 +7,7 @@
 - `commit()`/`rollback()` release the pooled connection in `finally`, preventing leaks and error-masking when COMMIT/ROLLBACK fails.
 - supalite no longer attaches an error listener to an externally-provided pool (`{ pool }`), preventing listener leaks when many clients share one pool.
 - `transaction(cb)` no longer re-runs the process-global `pg.types` BIGINT parser setup when forking its isolated scope, so starting a transaction can't flip BIGINT parsing for another `SupaLitePG` instance in the same process.
+- A failed `BEGIN`/`COMMIT`/`ROLLBACK` now passes the error to `release(err)`, so pg discards a possibly-broken pooled connection (reset/timeout) instead of returning it for reuse.
 
 ### Deprecated
 - Manual `begin()` / `commit()` / `rollback()` mutate the instance and are not concurrency-safe. Use `transaction(cb)`.

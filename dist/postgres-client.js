@@ -303,7 +303,9 @@ class SupaLitePG {
         catch (err) {
             // BEGIN failed: release the just-acquired connection so it doesn't leak
             // (isTransaction is still false, so commit()/rollback() won't release it).
-            this.client.release();
+            // Hand the error to release() so pg discards a possibly-broken connection
+            // (reset/timeout) instead of returning it to the pool for reuse.
+            this.client.release(err);
             this.client = null;
             throw err;
         }
@@ -315,11 +317,18 @@ class SupaLitePG {
     // 트랜잭션 커밋
     async commit() {
         if (this.isTransaction && this.client) {
+            let commitError;
             try {
                 await this.client.query('COMMIT');
             }
+            catch (err) {
+                commitError = err;
+                throw err;
+            }
             finally {
-                this.client.release();
+                // On COMMIT failure the connection may be in an unknown state — pass the
+                // error to release() so pg discards it instead of reusing a broken client.
+                this.client.release(commitError);
                 this.client = null;
                 this.isTransaction = false;
             }
@@ -332,11 +341,18 @@ class SupaLitePG {
     // 트랜잭션 롤백
     async rollback() {
         if (this.isTransaction && this.client) {
+            let rollbackError;
             try {
                 await this.client.query('ROLLBACK');
             }
+            catch (err) {
+                rollbackError = err;
+                throw err;
+            }
             finally {
-                this.client.release();
+                // On ROLLBACK failure the connection may be in an unknown state — pass the
+                // error to release() so pg discards it instead of reusing a broken client.
+                this.client.release(rollbackError);
                 this.client = null;
                 this.isTransaction = false;
             }

@@ -370,7 +370,9 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
     } catch (err) {
       // BEGIN failed: release the just-acquired connection so it doesn't leak
       // (isTransaction is still false, so commit()/rollback() won't release it).
-      this.client.release();
+      // Hand the error to release() so pg discards a possibly-broken connection
+      // (reset/timeout) instead of returning it to the pool for reuse.
+      this.client.release(err as Error);
       this.client = null;
       throw err;
     }
@@ -383,10 +385,16 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
   // 트랜잭션 커밋
   async commit(): Promise<void> {
     if (this.isTransaction && this.client) {
+      let commitError: unknown;
       try {
         await this.client.query('COMMIT');
+      } catch (err) {
+        commitError = err;
+        throw err;
       } finally {
-        this.client.release();
+        // On COMMIT failure the connection may be in an unknown state — pass the
+        // error to release() so pg discards it instead of reusing a broken client.
+        this.client.release(commitError as Error | undefined);
         this.client = null;
         this.isTransaction = false;
       }
@@ -400,10 +408,16 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
   // 트랜잭션 롤백
   async rollback(): Promise<void> {
     if (this.isTransaction && this.client) {
+      let rollbackError: unknown;
       try {
         await this.client.query('ROLLBACK');
+      } catch (err) {
+        rollbackError = err;
+        throw err;
       } finally {
-        this.client.release();
+        // On ROLLBACK failure the connection may be in an unknown state — pass the
+        // error to release() so pg discards it instead of reusing a broken client.
+        this.client.release(rollbackError as Error | undefined);
         this.client = null;
         this.isTransaction = false;
       }

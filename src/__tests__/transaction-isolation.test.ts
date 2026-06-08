@@ -191,6 +191,8 @@ describe('transaction connection cleanup on failure', () => {
 
     await expect(client.begin()).rejects.toThrow('begin failed');
     expect(c.release).toHaveBeenCalledTimes(1);
+    // Pass the error to release() so pg discards the possibly-broken connection.
+    expect(c.release).toHaveBeenCalledWith(expect.any(Error));
     expect(privateOf(client, 'client')).toBeNull();
     expect(privateOf(client, 'isTransaction')).toBe(false);
   });
@@ -203,6 +205,7 @@ describe('transaction connection cleanup on failure', () => {
     await client.begin();
     await expect(client.commit()).rejects.toThrow('commit failed');
     expect(c.release).toHaveBeenCalledTimes(1);
+    expect(c.release).toHaveBeenCalledWith(expect.any(Error)); // discard broken client
     expect(privateOf(client, 'client')).toBeNull();
     expect(privateOf(client, 'isTransaction')).toBe(false);
   });
@@ -215,8 +218,21 @@ describe('transaction connection cleanup on failure', () => {
     await client.begin();
     await expect(client.rollback()).rejects.toThrow('rollback failed');
     expect(c.release).toHaveBeenCalledTimes(1);
+    expect(c.release).toHaveBeenCalledWith(expect.any(Error)); // discard broken client
     expect(privateOf(client, 'client')).toBeNull();
     expect(privateOf(client, 'isTransaction')).toBe(false);
+  });
+
+  it('returns a healthy connection (no error) to the pool after a successful commit', async () => {
+    const c = makeClient();
+    poolConnect().mockResolvedValueOnce(c);
+    const client = new SupaLitePG({ connectionString: 'postgresql://mock' });
+
+    await client.transaction(async () => undefined);
+
+    // A clean commit must NOT mark the connection broken — release with no error.
+    expect(c.release).toHaveBeenCalledTimes(1);
+    expect(c.release).toHaveBeenCalledWith(undefined);
   });
 
   it('surfaces the callback error even when ROLLBACK also fails (no masking)', async () => {
