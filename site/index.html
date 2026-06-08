@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en" data-lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SupaLite — a lightweight TypeScript PostgreSQL client with a Supabase-style API</title>
+  <meta name="description" content="SupaLite is a lightweight TypeScript PostgreSQL client with the Supabase query builder you already know — query builder, RPC, and transactions, with less overhead than serverless Supabase." />
+  <meta name="theme-color" content="#0a0e14" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="SupaLite — Supabase-style queries, without the serverless latency" />
+  <meta property="og:description" content="A lightweight TypeScript PostgreSQL client: query builder + RPC + transactions, with a smaller footprint than supabase-js." />
+  <meta property="og:url" content="https://genideas-labs.github.io/supalite/" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
+  <link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+  <!-- ===================== NAV ===================== -->
+  <header class="nav">
+    <div class="container nav__inner">
+      <a class="brand" href="#top" aria-label="SupaLite home">
+        <img src="assets/favicon.svg" alt="" width="26" height="26" />
+        <span>SupaLite</span>
+      </a>
+      <nav class="nav__links" aria-label="Primary">
+        <a href="#features" data-i18n="nav.features">Features</a>
+        <a href="#compare" data-i18n="nav.compare">Compare</a>
+        <a href="#quickstart" data-i18n="nav.quickstart">Quickstart</a>
+        <a href="https://github.com/genideas-labs/supalite">GitHub</a>
+      </nav>
+      <div class="lang" role="group" aria-label="Language">
+        <button class="lang__btn is-active" type="button" data-lang="en">EN</button>
+        <button class="lang__btn" type="button" data-lang="ko">KO</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- ===================== HERO ===================== -->
+    <section class="hero">
+      <div class="container hero__inner">
+        <p class="eyebrow">TypeScript · PostgreSQL · MIT</p>
+        <h1 class="hero__title" data-i18n="hero.title">Supabase-style queries,<br />without the serverless latency.</h1>
+        <p class="hero__subtitle" data-i18n="hero.subtitle">
+          SupaLite is a lightweight TypeScript PostgreSQL client with the Supabase query builder
+          you already know — query builder, RPC, and transactions, with a smaller footprint and
+          less overhead in production.
+        </p>
+
+        <div class="install">
+          <span class="install__prompt">$</span>
+          <code>npm install supalite</code>
+          <button class="copy-btn install__copy" type="button" data-copy="npm install supalite" aria-label="Copy install command">
+            <span data-i18n="copy">Copy</span>
+          </button>
+        </div>
+
+        <div class="hero__cta">
+          <a class="btn btn--primary" href="#quickstart" data-i18n="hero.cta.start">Get started</a>
+          <a class="btn btn--ghost" href="https://github.com/genideas-labs/supalite">GitHub</a>
+          <a class="btn btn--ghost" href="https://www.npmjs.com/package/supalite">npm</a>
+        </div>
+
+        <div class="badges">
+          <a href="https://www.npmjs.com/package/supalite"><img src="https://img.shields.io/npm/v/supalite.svg?color=2dd4bf&labelColor=11161f" alt="npm version" /></a>
+          <a href="https://www.npmjs.com/package/supalite"><img src="https://img.shields.io/npm/dm/supalite.svg?color=2dd4bf&labelColor=11161f" alt="npm downloads" /></a>
+          <a href="https://github.com/genideas-labs/supalite/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/supalite.svg?color=2dd4bf&labelColor=11161f" alt="license" /></a>
+          <a href="https://www.npmjs.com/package/supalite"><img src="https://img.shields.io/node/v/supalite.svg?color=2dd4bf&labelColor=11161f" alt="node" /></a>
+        </div>
+
+        <p class="hero__trust" data-i18n="hero.trust">Used in production by <a href="https://oqoq.ai">oqoq.ai</a>.</p>
+      </div>
+    </section>
+
+    <!-- ===================== PITCH ===================== -->
+    <section class="pitch">
+      <div class="container">
+        <p class="pitch__text" data-i18n="pitch.text">
+          A slim Supabase client for <strong>query builder + RPC + transactions</strong>.
+          Need full Supabase features like auth, storage, or realtime? Use <code>supabase-js</code>.
+          SupaLite stays focused on being fast and small for the database layer.
+        </p>
+      </div>
+    </section>
+
+    <!-- ===================== FEATURES ===================== -->
+    <section class="section" id="features">
+      <div class="container">
+        <h2 class="section__title" data-i18n="features.heading">Everything you need for the query layer</h2>
+        <div class="grid">
+          <article class="card">
+            <div class="card__icon">{ }</div>
+            <h3 class="card__title" data-i18n="features.card1.title">Type-safe query builder</h3>
+            <p class="card__desc" data-i18n="features.card1.desc">Supabase-style chainable API, written in TypeScript with full type support across tables, views, functions, and enums.</p>
+          </article>
+          <article class="card">
+            <div class="card__icon">⇄</div>
+            <h3 class="card__title" data-i18n="features.card2.title">Transactions</h3>
+            <p class="card__desc" data-i18n="features.card2.desc">Safe, concurrency-safe DB transactions — something the Supabase client doesn't support. Each call runs on its own pooled connection.</p>
+          </article>
+          <article class="card">
+            <div class="card__icon">ƒ</div>
+            <h3 class="card__title" data-i18n="features.card3.title">RPC</h3>
+            <p class="card__desc" data-i18n="features.card3.desc">Call stored procedures and functions, including single() and maybeSingle() result helpers and scalar returns.</p>
+          </article>
+          <article class="card">
+            <div class="card__icon">⊞</div>
+            <h3 class="card__title" data-i18n="features.card4.title">Multi-schema</h3>
+            <p class="card__desc" data-i18n="features.card4.desc">Work across multiple schemas in a single typed client, with views, functions, and enums fully typed.</p>
+          </article>
+          <article class="card">
+            <div class="card__icon">⚡</div>
+            <h3 class="card__title" data-i18n="features.card5.title">Performance</h3>
+            <p class="card__desc" data-i18n="features.card5.desc">Connection pooling and efficient SQL generation. No HTTP/PostgREST serialization overhead between you and Postgres.</p>
+          </article>
+          <article class="card">
+            <div class="card__icon">⌁</div>
+            <h3 class="card__title" data-i18n="features.card6.title">Type generation CLI</h3>
+            <p class="card__desc" data-i18n="features.card6.desc"><code>supalite gen types</code> generates types from your live database — a superset of Supabase CLI output, with byte-for-byte compatibility on demand.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== COMPARE ===================== -->
+    <section class="section section--alt" id="compare">
+      <div class="container">
+        <h2 class="section__title" data-i18n="compare.heading">Reads like Supabase</h2>
+        <p class="section__lead" data-i18n="compare.desc">Keep the query ergonomics you already know. Here's the same query — fetch active users, newest first, page 2 (10 per page) — in each tool.</p>
+
+        <div class="tabs">
+          <div class="tabs__nav" role="tablist" aria-label="Query comparison">
+            <button class="tab is-active" type="button" data-tab="supalite" role="tab">SupaLite</button>
+            <button class="tab" type="button" data-tab="prisma" role="tab">Prisma</button>
+            <button class="tab" type="button" data-tab="drizzle" role="tab">Drizzle</button>
+          </div>
+
+          <div class="tab-panel is-active" data-panel="supalite">
+            <div class="code">
+              <div class="code__bar"><span class="code__lang">typescript</span><button class="copy-btn code__copy" type="button"><span data-i18n="copy">Copy</span></button></div>
+<pre><code class="language-typescript">const { data } = await client
+  .from('users')
+  .select('id, name, email, created_at')
+  .eq('status', 'active')
+  .order('created_at', { ascending: false })
+  .limit(10)
+  .offset((page - 1) * 10);</code></pre>
+            </div>
+          </div>
+
+          <div class="tab-panel" data-panel="prisma">
+            <div class="code">
+              <div class="code__bar"><span class="code__lang">typescript</span><button class="copy-btn code__copy" type="button"><span data-i18n="copy">Copy</span></button></div>
+<pre><code class="language-typescript">const data = await prisma.user.findMany({
+  select: { id: true, name: true, email: true, created_at: true },
+  where: { status: 'active' },
+  orderBy: { created_at: 'desc' },
+  take: 10,
+  skip: (page - 1) * 10,
+});</code></pre>
+            </div>
+          </div>
+
+          <div class="tab-panel" data-panel="drizzle">
+            <div class="code">
+              <div class="code__bar"><span class="code__lang">typescript</span><button class="copy-btn code__copy" type="button"><span data-i18n="copy">Copy</span></button></div>
+<pre><code class="language-typescript">const data = await db
+  .select({ id: users.id, name: users.name, email: users.email, created_at: users.createdAt })
+  .from(users)
+  .where(eq(users.status, 'active'))
+  .orderBy(desc(users.createdAt))
+  .limit(10)
+  .offset((page - 1) * 10);</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== COMPATIBILITY ===================== -->
+    <section class="section" id="compat">
+      <div class="container">
+        <h2 class="section__title" data-i18n="compat.heading">What's supported</h2>
+        <div class="compat">
+          <div class="compat__col compat__col--yes">
+            <h3 data-i18n="compat.supported.title">Supported</h3>
+            <ul>
+              <li data-i18n="compat.s1">Select, filters, order, pagination</li>
+              <li data-i18n="compat.s2">PostgREST-style embeds (<code>related(*)</code>, <code>!inner</code>)</li>
+              <li data-i18n="compat.s3">Insert, update, delete, upsert (incl. <code>ignoreDuplicates</code>)</li>
+              <li data-i18n="compat.s4">RPC (incl. <code>single</code> / <code>maybeSingle</code>)</li>
+              <li data-i18n="compat.s5">Concurrency-safe transactions</li>
+              <li data-i18n="compat.s6">Multi-schema, views, functions, enums</li>
+            </ul>
+          </div>
+          <div class="compat__col compat__col--no">
+            <h3 data-i18n="compat.notsupported.title">Not supported — use supabase-js</h3>
+            <ul>
+              <li data-i18n="compat.n1">Auth</li>
+              <li data-i18n="compat.n2">Storage</li>
+              <li data-i18n="compat.n3">Realtime</li>
+            </ul>
+          </div>
+        </div>
+        <div class="callout">
+          <h3 data-i18n="compat.fit.title">SupaLite vs Prisma / Drizzle</h3>
+          <p data-i18n="compat.fit.desc">Choose SupaLite when you want a thin, SQL-close query layer — especially when migrating off Supabase — and handle migrations separately. Choose Prisma or Drizzle when you want schema-first modeling and built-in migrations.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== QUICKSTART ===================== -->
+    <section class="section section--alt" id="quickstart">
+      <div class="container">
+        <h2 class="section__title" data-i18n="quickstart.heading">Quickstart</h2>
+
+        <ol class="steps">
+          <li class="step">
+            <h3 class="step__title"><span class="step__num">1</span><span data-i18n="quickstart.step1">Install</span></h3>
+            <div class="code">
+              <div class="code__bar"><span class="code__lang">bash</span><button class="copy-btn code__copy" type="button"><span data-i18n="copy">Copy</span></button></div>
+<pre><code class="language-bash">npm install supalite</code></pre>
+            </div>
+          </li>
+
+          <li class="step">
+            <h3 class="step__title"><span class="step__num">2</span><span data-i18n="quickstart.step2">Connect</span></h3>
+            <div class="code">
+              <div class="code__bar"><span class="code__lang">typescript</span><button class="copy-btn code__copy" type="button"><span data-i18n="copy">Copy</span></button></div>
+<pre><code class="language-typescript">import { SupaLitePG } from 'supalite';
+import { Database } from './types/database';
+
+const client = new SupaLitePG&lt;Database&gt;({
+  connectionString: process.env.DB_CONNECTION,
+});</code></pre>
+            </div>
+          </li>
+
+          <li class="step">
+            <h3 class="step__title"><span class="step__num">3</span><span data-i18n="quickstart.step3">Query &amp; transact</span></h3>
+            <div class="code">
+              <div class="code__bar"><span class="code__lang">typescript</span><button class="copy-btn code__copy" type="button"><span data-i18n="copy">Copy</span></button></div>
+<pre><code class="language-typescript">const { data, error } = await client
+  .from('users')
+  .select('id, name, email')
+  .eq('status', 'active')
+  .order('created_at', { ascending: false })
+  .limit(10);
+
+// Transactions — not supported by the Supabase client
+await client.transaction(async (tx) =&gt; {
+  const { data: user } = await tx
+    .from('users')
+    .insert({ name: 'Hong', email: 'hong@example.com' })
+    .select()
+    .single();
+
+  await tx
+    .from('profiles')
+    .insert({ user_id: user.id, bio: 'Transaction profile' });
+});</code></pre>
+            </div>
+          </li>
+
+          <li class="step">
+            <h3 class="step__title"><span class="step__num">4</span><span data-i18n="quickstart.step4">Generate types from your database</span></h3>
+            <div class="code">
+              <div class="code__bar"><span class="code__lang">bash</span><button class="copy-btn code__copy" type="button"><span data-i18n="copy">Copy</span></button></div>
+<pre><code class="language-bash">npx supalite gen types \
+  --db-url "postgresql://user:pass@localhost:5432/db" \
+  --out database.types.ts</code></pre>
+            </div>
+          </li>
+        </ol>
+
+        <p class="quickstart__more">
+          <a class="btn btn--primary" href="https://github.com/genideas-labs/supalite#readme" data-i18n="quickstart.docs">Read the full docs →</a>
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===================== FOOTER ===================== -->
+  <footer class="footer">
+    <div class="container footer__inner">
+      <div class="footer__brand">
+        <div class="brand">
+          <img src="assets/favicon.svg" alt="" width="22" height="22" />
+          <span>SupaLite</span>
+        </div>
+        <p data-i18n="footer.tagline">A lightweight TypeScript PostgreSQL client with a Supabase-style API.</p>
+      </div>
+      <nav class="footer__links" aria-label="Footer">
+        <a href="https://github.com/genideas-labs/supalite">GitHub</a>
+        <a href="https://www.npmjs.com/package/supalite">npm</a>
+        <a href="https://github.com/genideas-labs/supalite#readme">README</a>
+        <a href="https://github.com/genideas-labs/supalite/blob/main/README.ko.md">한국어 README</a>
+        <a href="https://github.com/genideas-labs/supalite/issues">Issues</a>
+        <a href="https://github.com/genideas-labs/supalite/blob/main/LICENSE">MIT License</a>
+      </nav>
+    </div>
+    <div class="container footer__copy">
+      <span>© Genideas Inc. · MIT License</span>
+    </div>
+  </footer>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="assets/app.js"></script>
+</body>
+</html>
