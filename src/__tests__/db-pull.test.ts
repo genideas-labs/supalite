@@ -119,6 +119,21 @@ describe('generateBaselineSql', () => {
     expect(baseline.indexOf('-- constraints')).toBeLessThan(baseline.indexOf('-- foreign keys'));
   });
 
+  test('views: topo order, options, matviews, aggregate/partition diversion, view-stage functions', () => {
+    expect(baseline.indexOf('CREATE OR REPLACE VIEW db_pull_schema.paid_orders')).toBeLessThan(
+      baseline.indexOf('CREATE OR REPLACE VIEW db_pull_schema.paid_order_totals')
+    );
+    expect(baseline).toContain('security_barrier');
+    expect(baseline).toContain('CREATE MATERIALIZED VIEW IF NOT EXISTS db_pull_schema.order_totals_mv');
+    expect(baseline).toContain('WITH NO DATA');
+    expect(baseline).not.toContain('CREATE OR REPLACE VIEW db_pull_schema.agg_totals');
+    expect(baseline).not.toContain('CREATE OR REPLACE VIEW db_pull_schema.events_view');
+    const viewFns = baseline.indexOf('-- view-dependent functions');
+    expect(viewFns).toBeGreaterThan(baseline.indexOf('-- views'));
+    expect(baseline.slice(viewFns)).toContain('paid_orders_all');
+    expect(baseline.slice(viewFns)).toContain('get_paid');
+  });
+
   test('header, schema creation, and normalization', () => {
     expect(baseline).toContain('-- supalite db pull baseline');
     expect(baseline).toContain('SET check_function_bodies = off;');

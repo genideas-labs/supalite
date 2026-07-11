@@ -875,6 +875,111 @@ const renderDeferredDefaults = (ctx: Ctx): string[] => {
   return ['-- deferred column defaults', ...statements];
 };
 
+const renderViews = async (ctx: Ctx): Promise<string[]> => {
+  const { rows: views } = await ctx.client.query<{
+    oid: string;
+    schema: string;
+    name: string;
+    qualified_raw: string;
+    relkind: string;
+    populated: boolean;
+    options: string | null;
+    definition: string;
+  }>(
+    `SELECT c.oid::text AS oid,
+            quote_ident(n.nspname) AS schema,
+            quote_ident(c.relname) AS name,
+            format('%I.%I', n.nspname, c.relname) AS qualified_raw,
+            c.relkind::text AS relkind,
+            c.relispopulated AS populated,
+            array_to_string(c.reloptions, ', ') AS options,
+            pg_get_viewdef(c.oid, true) AS definition
+     FROM pg_class c
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = ANY($1)
+       AND c.relkind IN ('v', 'm')
+       ${extensionFilter(ctx, 'pg_class', 'c.oid')}
+     ORDER BY n.nspname, c.relname`,
+    [ctx.schemas]
+  );
+  if (views.length === 0) {
+    return [];
+  }
+
+  const { rows: deps } = await ctx.client.query<{ view_oid: string; ref_oid: string; ref_class: string }>(
+    `SELECT DISTINCT r.ev_class::text AS view_oid,
+            d.refobjid::text AS ref_oid,
+            d.refclassid::regclass::text AS ref_class
+     FROM pg_depend d
+     JOIN pg_rewrite r ON r.oid = d.objid
+     WHERE d.classid = 'pg_rewrite'::regclass
+       AND d.refclassid IN ('pg_class'::regclass, 'pg_proc'::regclass)
+       AND r.ev_class <> d.refobjid`
+  );
+
+  const viewOids = new Set(views.map((view) => view.oid));
+  const depsByView = new Map<string, Array<{ ref_oid: string; ref_class: string }>>();
+  deps.forEach((dep) => {
+    if (viewOids.has(dep.view_oid)) {
+      depsByView.set(dep.view_oid, [...(depsByView.get(dep.view_oid) ?? []), dep]);
+    }
+  });
+
+  // Divert views depending on excluded objects, transitively (FR-016).
+  const diverted = new Set<string>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    views.forEach((view) => {
+      if (diverted.has(view.oid)) {
+        return;
+      }
+      const hit = (depsByView.get(view.oid) ?? []).some(
+        (dep) =>
+          (dep.ref_class === 'pg_class' && (ctx.exclusion.relations.has(dep.ref_oid) || diverted.has(dep.ref_oid))) ||
+          (dep.ref_class === 'pg_proc' && ctx.exclusion.functions.has(dep.ref_oid))
+      );
+      if (hit) {
+        diverted.add(view.oid);
+        ctx.state.footerDiverted.push(
+          `view depending on excluded objects (not emitted): ${view.qualified_raw}`
+        );
+        changed = true;
+      }
+    });
+  }
+
+  const emitted = views.filter((view) => !diverted.has(view.oid));
+  const edges: Array<[string, string]> = [];
+  emitted.forEach((view) => {
+    (depsByView.get(view.oid) ?? []).forEach((dep) => {
+      if (dep.ref_class === 'pg_class' && viewOids.has(dep.ref_oid) && !diverted.has(dep.ref_oid)) {
+        edges.push([dep.ref_oid, view.oid]);
+      }
+    });
+  });
+
+  const cleanDef = (definition: string): string => {
+    const trimmed = normalizeLf(definition).trim();
+    return trimmed.endsWith(';') ? trimmed.slice(0, -1) : trimmed;
+  };
+
+  const statements = topoSort(emitted, (view) => view.oid, edges).map((view) => {
+    const withOptions = view.options ? ` WITH (${view.options})` : '';
+    if (view.relkind === 'v') {
+      return `CREATE OR REPLACE VIEW ${view.schema}.${view.name}${withOptions} AS\n${cleanDef(view.definition)};`;
+    }
+    const create = ctx.ifNotExists ? 'CREATE MATERIALIZED VIEW IF NOT EXISTS' : 'CREATE MATERIALIZED VIEW';
+    const noData = view.populated ? '' : '\nWITH NO DATA';
+    return `${create} ${view.schema}.${view.name}${withOptions} AS\n${cleanDef(view.definition)}${noData};`;
+  });
+
+  if (statements.length === 0) {
+    return [];
+  }
+  return ['-- views', ...statements];
+};
+
 export const generateBaselineSql = async (options: DbPullOptions): Promise<string> => {
   const schemas = options.schemas && options.schemas.length > 0 ? options.schemas : ['public'];
   const client = new Client({ connectionString: options.dbUrl });
@@ -922,6 +1027,8 @@ export const generateBaselineSql = async (options: DbPullOptions): Promise<strin
     const constraintSections = await renderConstraints(ctx);
     sections.push(constraintSections.constraints);
     sections.push(constraintSections.foreignKeys);
+    sections.push(await renderViews(ctx));
+    sections.push(renderFunctionStage(functions, 'view'));
     ctx.state.generatedColumnFunctionDeps.forEach((dep) => {
       const worstStage = dep.functionOids
         .map((oid) => functionStageByOid.get(oid) ?? 'type')
