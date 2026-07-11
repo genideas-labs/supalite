@@ -87,10 +87,25 @@ start with a `-- <section>` banner line (used by ordering tests). Order:
 | 17 | footer | partition hierarchies (`relkind='p'` parents + `relispartition` leaves), aggregates/window (`prokind IN ('a','w')`), dependents of excluded objects (views on aggregates, FKs to excluded relations, generated columns calling table/view-stage functions), non-reproduced table/view variants (typed/inherited tables, non-default AM/tablespace/storage/replica identity), external FK refs | comment block |
 
 Function staging query: classify each function once by scanning
-`prorettype` + `proargtypes` (resolving arrays through `typelem` and
-composites through their attribute closure): no relation row types → §6;
-table row types only → §9; any view row type → §14. Bodies are never
-inspected (`check_function_bodies = off` covers them).
+`prorettype` + `COALESCE(proallargtypes, proargtypes::oid[])` (so
+OUT/INOUT/`RETURNS TABLE` columns count too), resolving arrays through
+`typelem` and composites through their attribute closure: no relation row
+types → §6; table row types only → §9; any view row type → §14. Bodies are
+never inspected (`check_function_bodies = off` covers them).
+
+Exclusion closure (FR-016 mechanism): build the excluded-object oid set
+(partition parents + `relispartition` leaves, aggregates/window functions,
+extension-owned objects when filtering), fetch the relevant `pg_depend`
+edges once, and propagate to a fixpoint. Renderers consult the closure and
+divert any dependent statement (view, FK, constraint, deferred default,
+relation-referencing composite/domain, function whose *signature*
+references an excluded relation) to the footer. v1 multi-stage limitation:
+defaults/CHECKs calling view-stage functions and views calling view-stage
+functions are also footer-diverted rather than re-ordered. Domain
+defaults/CHECKs calling user functions are deferred via
+`ALTER DOMAIN ... SET DEFAULT` (§10) / guarded `ADD CONSTRAINT` (§11).
+Table topo edges also resolve `typelem` so a `customers[]` column orders
+after `customers`.
 
 Cross-cutting:
 

@@ -29,8 +29,9 @@ individually.
    **Then** a file `supabase/migrations/<UTC YYYYMMDDHHMMSS>_baseline.sql`
    is created (directory auto-created) containing DDL for all supported
    object kinds in dependency order.
-2. **Given** the generated baseline file and an empty database (where any
-   externally-referenced schemas listed in the footer already exist),
+2. **Given** the generated baseline file and an empty database (where all
+   footer-listed externally-referenced objects — schemas AND their
+   referenced tables — already exist),
    **When** the file is applied,
    **Then** every dumped object is created without error (schemas,
    extensions, sequences, types, tables, functions, constraints, indexes,
@@ -74,10 +75,10 @@ individually.
 - Source function bodies contain CRLF line endings → output file is
   LF-only.
 - Unsupported objects exist in the schema (partitioned tables and their
-  leaf partitions, aggregate/window functions, domain types, typed/
-  inherited/UNLOGGED-variant specifics beyond FR-009) → reproduced where
-  specified, otherwise skipped and listed in a footer comment, never
-  silently dropped.
+  leaf partitions, aggregate/window functions, typed/inherited-variant
+  specifics beyond FR-009) → reproduced where specified, otherwise
+  skipped and listed in a footer comment — together with their transitive
+  dependents — never silently dropped.
 - A view has an `INSTEAD OF` trigger → the trigger is emitted after the
   view and applies cleanly.
 - Identifiers/labels contain mixed case, reserved words, embedded single
@@ -126,8 +127,11 @@ individually.
   database that already contains the schema MUST produce zero errors:
   `IF NOT EXISTS` on schemas/extensions/sequences/tables/indexes,
   `CREATE OR REPLACE` on functions/triggers/views, exception-guarded
-  `CREATE TYPE`, and every `ALTER TABLE ... ADD CONSTRAINT` wrapped in a
-  `DO $$` guard that checks `pg_constraint` by constraint name and table.
+  `CREATE TYPE`/`CREATE DOMAIN`, and every `ALTER TABLE ... ADD CONSTRAINT`
+  wrapped in a `DO` guard that checks `pg_constraint` by constraint name
+  and table. All generated `DO` guards use a content-safe dollar tag
+  (`$supalite$`, falling back to `$supalite1$`, ... when the wrapped text
+  contains the tag).
 - **FR-007**: `--no-if-not-exists` MUST emit plain DDL instead (no guards),
   except `CREATE SCHEMA` / `CREATE EXTENSION` which always keep
   `IF NOT EXISTS`.
@@ -159,6 +163,9 @@ individually.
   NOT NULL, CHECK constraints), and composite types, emitted in a unified
   topological order (composite-on-composite, domain-over-enum,
   array-of-composite attributes resolved through their element type).
+  Domain defaults/CHECKs that call user functions are emitted as deferred
+  `ALTER DOMAIN ... SET DEFAULT` / guarded `ALTER DOMAIN ... ADD
+  CONSTRAINT` after the required function stage.
 - **FR-012**: Constraint coverage MUST include PK, UNIQUE, CHECK, EXCLUDE,
   and FK (table-level, from the system catalogs — CHECK constraints are not
   inlined in `CREATE TABLE`).
@@ -186,11 +193,17 @@ individually.
   (FR-009/FR-014), and FKs referencing schemas outside the selection
   (the referenced objects must pre-exist on an otherwise-empty target).
   Supported DDL that *depends on* an excluded object MUST NOT be emitted
-  as failing statements: views depending on excluded aggregates and FKs
-  referencing excluded relations (partition parents, extension-owned
-  tables) are omitted from executable output and footer-listed instead;
-  generated columns calling table/view-stage user functions are
-  footer-flagged (the expression cannot be deferred).
+  as failing statements: the generator computes a transitive dependency
+  closure rooted at every excluded object (partition parents/leaves,
+  aggregates, extension-owned objects when filtering) and diverts all
+  affected supported DDL — views, FKs, constraints, deferred defaults,
+  composites/domains referencing relation row types, and functions whose
+  signatures reference excluded relations — to the footer instead.
+  Generated columns calling table/view-stage user functions are
+  footer-flagged (the expression cannot be deferred), as are
+  defaults/CHECKs calling view-stage functions and views calling
+  view-stage functions (multi-stage view↔function interleavings are a
+  documented v1 limitation).
 - **FR-017**: `--mode` values other than `baseline` MUST exit 1 with
   `Only --mode baseline is supported in this version (diff is planned).`
 - **FR-018**: A selection that yields zero objects MUST still produce a

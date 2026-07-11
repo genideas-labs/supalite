@@ -107,9 +107,14 @@ decision trade-offs live in [tradeoffs.md](tradeoffs.md).
 - **Rationale**: `SET check_function_bodies = off` defers only function
   *body* validation — signatures, column defaults, CHECK expressions,
   generated columns, and index predicates resolve at DDL time.
-- **Residual v1 limitation**: a generated column calling a table/view-stage
-  function cannot replay (expression fixed at CREATE TABLE) — detected and
-  footer-flagged.
+- **Residual v1 limitations** (all detected and footer-flagged, never
+  silently broken): a generated column calling a table/view-stage function
+  (expression fixed at CREATE TABLE); defaults/CHECKs calling view-stage
+  functions; views calling view-stage functions (multi-stage
+  view↔function interleaving); composites/domains referencing relation
+  row types. Signature scan uses
+  `COALESCE(proallargtypes, proargtypes::oid[])` so OUT/`RETURNS TABLE`
+  columns are classified correctly.
 - **Alternatives**: full `pg_depend` statement-level topological
   interleaving (pg_dump approach) — deferred to v2 with `--mode diff`.
 
@@ -151,17 +156,25 @@ decision trade-offs live in [tradeoffs.md](tradeoffs.md).
   `NOT NULL`, CHECK constraints via `pg_get_constraintdef`) inside the
   unified types topo-sort, removing the failure class where a
   domain-typed column breaks `CREATE TABLE` on an empty target.
+  Domain defaults/CHECKs that call user functions are split out: the
+  domain shell is created in §5, the function-dependent default via
+  `ALTER DOMAIN ... SET DEFAULT` in §10, and function-dependent CHECKs
+  via guarded `ALTER DOMAIN ... ADD CONSTRAINT` in §11 (round-3 finding —
+  domain expressions resolve at CREATE DOMAIN time).
 - **Rationale**: supporting domains is strictly cheaper than
   dependency-closure omission of their dependents.
 
 ## R14. Dependents of excluded objects (round 2)
 
 - **Decision**: DDL that would necessarily fail on an empty target is
-  never emitted: views whose `pg_depend` closure includes an excluded
-  aggregate, and FKs whose `confrelid` is an excluded relation (partition
-  parent, extension-owned table) — both footer-listed. External-schema
-  FKs remain emitted (the referenced schema+table are a documented
-  pre-existing prerequisite, spec Scenario 2).
+  never emitted. The generator computes a transitive `pg_depend` closure
+  rooted at every excluded object (partition parents/leaves, aggregates,
+  extension-owned objects) and footer-diverts all affected supported DDL:
+  views, FKs, constraints, deferred defaults, relation-referencing
+  composites/domains, and functions whose signatures reference excluded
+  relations. External-schema FKs remain emitted (the referenced
+  schema+table are a documented pre-existing prerequisite, spec
+  Scenario 2).
 
 ## R15. Dollar-quote tag collision (round 2)
 
