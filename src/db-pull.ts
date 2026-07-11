@@ -15,8 +15,10 @@ type DeferredDomainConstraint = {
 };
 
 type PullState = {
+  deferredColumnDefaults: string[];
   deferredDomainDefaults: string[];
   deferredDomainConstraints: DeferredDomainConstraint[];
+  generatedColumnFunctionDeps: Array<{ qualifiedRaw: string; column: string; functionOids: string[] }>;
   footerDiverted: string[];
 };
 
@@ -197,6 +199,36 @@ const renderSequences = async (ctx: Ctx): Promise<string[]> => {
   ];
 };
 
+// Follows typelem chains (arrays -> element type) and reports the relkind of
+// the relation backing a row type ('' when the type is not a row type).
+const createTypeResolver = async (
+  ctx: Ctx,
+  seedOids: string[]
+): Promise<{ resolveRef: (oid: string) => string; relkindOf: (oid: string) => string }> => {
+  const resolveMap = new Map<string, { elem: string; relkind: string }>();
+  let pending = seedOids.filter((oid) => oid !== '0');
+  while (pending.length > 0) {
+    const { rows } = await ctx.client.query<{ oid: string; elem: string; relkind: string }>(
+      `SELECT t.oid::text AS oid, t.typelem::text AS elem, COALESCE(c.relkind::text, '') AS relkind
+       FROM pg_type t
+       LEFT JOIN pg_class c ON c.oid = t.typrelid
+       WHERE t.oid = ANY($1::oid[])`,
+      [pending]
+    );
+    rows.forEach((row) => resolveMap.set(row.oid, { elem: row.elem, relkind: row.relkind }));
+    pending = rows.filter((row) => row.elem !== '0' && !resolveMap.has(row.elem)).map((row) => row.elem);
+  }
+  const resolveRef = (oid: string): string => {
+    let current = oid;
+    for (let info = resolveMap.get(current); info && info.elem !== '0'; info = resolveMap.get(current)) {
+      current = info.elem;
+    }
+    return current;
+  };
+  const relkindOf = (oid: string): string => resolveMap.get(oid)?.relkind ?? '';
+  return { resolveRef, relkindOf };
+};
+
 const wrapDuplicateGuard = (statement: string): string => {
   const tag = dollarTag(statement);
   return `DO ${tag} BEGIN\n  ${statement}\nEXCEPTION WHEN duplicate_object THEN NULL; END ${tag};`;
@@ -313,33 +345,9 @@ const renderTypes = async (ctx: Ctx): Promise<string[]> => {
   const refOids = new Set<string>();
   domains.forEach((row) => refOids.add(row.base_ref));
   composites.forEach((row) => row.attr_type_oids.forEach((oid) => refOids.add(oid)));
-  const resolveMap = new Map<string, { elem: string; relkind: string }>();
-  let pending = Array.from(refOids);
-  while (pending.length > 0) {
-    const { rows: typeInfo } = await ctx.client.query<{ oid: string; elem: string; relkind: string }>(
-      `SELECT t.oid::text AS oid, t.typelem::text AS elem, COALESCE(c.relkind::text, '') AS relkind
-       FROM pg_type t
-       LEFT JOIN pg_class c ON c.oid = t.typrelid
-       WHERE t.oid = ANY($1::oid[])`,
-      [pending]
-    );
-    typeInfo.forEach((row) => resolveMap.set(row.oid, { elem: row.elem, relkind: row.relkind }));
-    pending = typeInfo
-      .filter((row) => row.elem !== '0' && !resolveMap.has(row.elem))
-      .map((row) => row.elem);
-  }
-  const resolveRef = (oid: string): string => {
-    let current = oid;
-    for (let info = resolveMap.get(current); info && info.elem !== '0'; info = resolveMap.get(current)) {
-      current = info.elem;
-    }
-    return current;
-  };
+  const { resolveRef, relkindOf } = await createTypeResolver(ctx, Array.from(refOids));
   const referencesRelation = (oids: string[]): boolean =>
-    oids.some((oid) => {
-      const info = resolveMap.get(resolveRef(oid));
-      return info !== undefined && ['r', 'p', 'v', 'm', 'f'].includes(info.relkind);
-    });
+    oids.some((oid) => ['r', 'p', 'v', 'm', 'f'].includes(relkindOf(resolveRef(oid))));
 
   type TypeItem = { oid: string; sql: string };
   const items: TypeItem[] = [];
@@ -405,6 +413,218 @@ const renderTypes = async (ctx: Ctx): Promise<string[]> => {
   ];
 };
 
+const renderTables = async (ctx: Ctx): Promise<string[]> => {
+  const { rows: tables } = await ctx.client.query<{
+    oid: string;
+    rowtype_oid: string;
+    schema: string;
+    name: string;
+    qualified_raw: string;
+    unlogged: boolean;
+  }>(
+    `SELECT c.oid::text AS oid,
+            c.reltype::text AS rowtype_oid,
+            quote_ident(n.nspname) AS schema,
+            quote_ident(c.relname) AS name,
+            format('%I.%I', n.nspname, c.relname) AS qualified_raw,
+            c.relpersistence = 'u' AS unlogged
+     FROM pg_class c
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = ANY($1)
+       AND c.relkind = 'r'
+       AND NOT c.relispartition
+       ${extensionFilter(ctx, 'pg_class', 'c.oid')}
+     ORDER BY n.nspname, c.relname`,
+    [ctx.schemas]
+  );
+  if (tables.length === 0) {
+    return [];
+  }
+
+  type ColumnRow = {
+    name: string;
+    data_type: string;
+    type_oid: string;
+    not_null: boolean;
+    identity: string;
+    generated: string;
+    default_expr: string | null;
+    default_uses_function: boolean;
+    default_function_oids: string[] | null;
+    collation_quoted: string | null;
+    collation_differs: boolean;
+    identity_start: string | null;
+    identity_increment: string | null;
+    identity_cache: string | null;
+    identity_cycle: boolean | null;
+  };
+
+  const columnsByTable = new Map<string, ColumnRow[]>();
+  for (const table of tables) {
+    const { rows: columns } = await ctx.client.query<ColumnRow>(
+      `SELECT quote_ident(a.attname) AS name,
+              format_type(a.atttypid, a.atttypmod) AS data_type,
+              a.atttypid::text AS type_oid,
+              a.attnotnull AS not_null,
+              a.attidentity AS identity,
+              a.attgenerated AS generated,
+              pg_get_expr(ad.adbin, ad.adrelid) AS default_expr,
+              CASE WHEN ad.oid IS NULL THEN false ELSE ${USER_FUNCTION_DEP('pg_attrdef', 'ad.oid')} END AS default_uses_function,
+              CASE WHEN ad.oid IS NULL THEN NULL ELSE (
+                SELECT array_agg(fdep.refobjid::text)
+                FROM pg_depend fdep
+                JOIN pg_proc fproc ON fproc.oid = fdep.refobjid
+                JOIN pg_namespace fns ON fns.oid = fproc.pronamespace
+                WHERE fdep.classid = 'pg_attrdef'::regclass
+                  AND fdep.objid = ad.oid
+                  AND fdep.refclassid = 'pg_proc'::regclass
+                  AND fns.nspname NOT IN ('pg_catalog', 'information_schema')
+              ) END AS default_function_oids,
+              quote_ident(col.collname) AS collation_quoted,
+              (a.attcollation <> 0 AND a.attcollation <> typ.typcollation) AS collation_differs,
+              iseq.start AS identity_start,
+              iseq.increment AS identity_increment,
+              iseq.cache AS identity_cache,
+              iseq.cycle AS identity_cycle
+       FROM pg_attribute a
+       JOIN pg_type typ ON typ.oid = a.atttypid
+       LEFT JOIN pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
+       LEFT JOIN pg_collation col ON col.oid = a.attcollation
+       LEFT JOIN LATERAL (
+         SELECT s.seqstart::text AS start,
+                s.seqincrement::text AS increment,
+                s.seqcache::text AS cache,
+                s.seqcycle AS cycle
+         FROM pg_depend idep
+         JOIN pg_sequence s ON s.seqrelid = idep.objid
+         WHERE idep.classid = 'pg_class'::regclass
+           AND idep.refclassid = 'pg_class'::regclass
+           AND idep.refobjid = a.attrelid
+           AND idep.refobjsubid = a.attnum
+           AND idep.deptype = 'i'
+       ) iseq ON a.attidentity IN ('a', 'd')
+       WHERE a.attrelid = $1 AND a.attnum > 0 AND NOT a.attisdropped
+       ORDER BY a.attnum`,
+      [table.oid]
+    );
+    columnsByTable.set(table.oid, columns);
+  }
+
+  const columnTypeOids = new Set<string>();
+  columnsByTable.forEach((columns) => columns.forEach((col) => columnTypeOids.add(col.type_oid)));
+  const { resolveRef } = await createTypeResolver(ctx, Array.from(columnTypeOids));
+  const tableByRowtype = new Map(tables.map((table) => [table.rowtype_oid, table.oid]));
+  const edges: Array<[string, string]> = [];
+  tables.forEach((table) => {
+    (columnsByTable.get(table.oid) ?? []).forEach((col) => {
+      const target = tableByRowtype.get(resolveRef(col.type_oid));
+      if (target && target !== table.oid) {
+        edges.push([target, table.oid]);
+      }
+    });
+  });
+
+  const statements = topoSort(tables, (table) => table.oid, edges).map((table) => {
+    const columnLines = (columnsByTable.get(table.oid) ?? []).map((col) => {
+      const parts = [`${col.name} ${col.data_type}`];
+      if (col.collation_differs && col.collation_quoted) {
+        parts.push(`COLLATE ${col.collation_quoted}`);
+      }
+      if (col.generated === 's') {
+        parts.push(`GENERATED ALWAYS AS (${col.default_expr}) STORED`);
+        if (col.default_uses_function && col.default_function_oids) {
+          ctx.state.generatedColumnFunctionDeps.push({
+            qualifiedRaw: table.qualified_raw,
+            column: col.name,
+            functionOids: col.default_function_oids,
+          });
+        }
+      } else if (col.identity === 'a' || col.identity === 'd') {
+        let identity = col.identity === 'a' ? 'GENERATED ALWAYS AS IDENTITY' : 'GENERATED BY DEFAULT AS IDENTITY';
+        const opts: string[] = [];
+        if (col.identity_start && col.identity_start !== '1') {
+          opts.push(`START WITH ${col.identity_start}`);
+        }
+        if (col.identity_increment && col.identity_increment !== '1') {
+          opts.push(`INCREMENT BY ${col.identity_increment}`);
+        }
+        if (col.identity_cache && col.identity_cache !== '1') {
+          opts.push(`CACHE ${col.identity_cache}`);
+        }
+        if (col.identity_cycle) {
+          opts.push('CYCLE');
+        }
+        if (opts.length > 0) {
+          identity += ` (${opts.join(' ')})`;
+        }
+        parts.push(identity);
+      } else if (col.default_expr) {
+        if (col.default_uses_function) {
+          ctx.state.deferredColumnDefaults.push(
+            `ALTER TABLE ${table.schema}.${table.name} ALTER COLUMN ${col.name} SET DEFAULT ${col.default_expr};`
+          );
+        } else {
+          parts.push(`DEFAULT ${col.default_expr}`);
+        }
+      }
+      if (col.not_null && col.identity !== 'a' && col.identity !== 'd') {
+        parts.push('NOT NULL');
+      }
+      return `  ${parts.join(' ')}`;
+    });
+    const create = table.unlogged
+      ? ctx.ifNotExists
+        ? 'CREATE UNLOGGED TABLE IF NOT EXISTS'
+        : 'CREATE UNLOGGED TABLE'
+      : ctx.ifNotExists
+        ? 'CREATE TABLE IF NOT EXISTS'
+        : 'CREATE TABLE';
+    return `${create} ${table.schema}.${table.name} (\n${columnLines.join(',\n')}\n);`;
+  });
+
+  return ['-- tables', ...statements];
+};
+
+const renderSequenceOwnership = async (ctx: Ctx): Promise<string[]> => {
+  const { rows } = await ctx.client.query<{
+    seq_schema: string;
+    seq_name: string;
+    table_schema: string;
+    table_name: string;
+    column_name: string;
+  }>(
+    `SELECT quote_ident(sn.nspname) AS seq_schema,
+            quote_ident(sc.relname) AS seq_name,
+            quote_ident(tn.nspname) AS table_schema,
+            quote_ident(tc.relname) AS table_name,
+            quote_ident(a.attname) AS column_name
+     FROM pg_depend dep
+     JOIN pg_class sc ON sc.oid = dep.objid AND sc.relkind = 'S'
+     JOIN pg_namespace sn ON sn.oid = sc.relnamespace
+     JOIN pg_class tc ON tc.oid = dep.refobjid
+     JOIN pg_namespace tn ON tn.oid = tc.relnamespace
+     JOIN pg_attribute a ON a.attrelid = tc.oid AND a.attnum = dep.refobjsubid
+     WHERE dep.classid = 'pg_class'::regclass
+       AND dep.refclassid = 'pg_class'::regclass
+       AND dep.deptype = 'a'
+       AND sn.nspname = ANY($1)
+       ${extensionFilter(ctx, 'pg_class', 'sc.oid')}
+       ${extensionFilter(ctx, 'pg_class', 'tc.oid')}
+     ORDER BY sn.nspname, sc.relname`,
+    [ctx.schemas]
+  );
+  if (rows.length === 0) {
+    return [];
+  }
+  return [
+    '-- sequence ownership',
+    ...rows.map(
+      (row) =>
+        `ALTER SEQUENCE ${row.seq_schema}.${row.seq_name} OWNED BY ${row.table_schema}.${row.table_name}.${row.column_name};`
+    ),
+  ];
+};
+
 export const generateBaselineSql = async (options: DbPullOptions): Promise<string> => {
   const schemas = options.schemas && options.schemas.length > 0 ? options.schemas : ['public'];
   const client = new Client({ connectionString: options.dbUrl });
@@ -416,8 +636,10 @@ export const generateBaselineSql = async (options: DbPullOptions): Promise<strin
       filterExtensions: !(options.includeExtensionObjects ?? false),
       ifNotExists: options.ifNotExists ?? true,
       state: {
+        deferredColumnDefaults: [],
         deferredDomainDefaults: [],
         deferredDomainConstraints: [],
+        generatedColumnFunctionDeps: [],
         footerDiverted: [],
       },
     };
@@ -437,6 +659,8 @@ export const generateBaselineSql = async (options: DbPullOptions): Promise<strin
     sections.push(await renderExtensions(ctx));
     sections.push(await renderSequences(ctx));
     sections.push(await renderTypes(ctx));
+    sections.push(await renderTables(ctx));
+    sections.push(await renderSequenceOwnership(ctx));
     const body = sections
       .filter((section) => section.length > 0)
       .map((section) => section.join('\n'))
