@@ -3,6 +3,7 @@ import path from 'node:path';
 import { Pool } from 'pg';
 import { config } from 'dotenv';
 import { generateBaselineSql } from '../db-pull';
+import { generateBaselineSql as rootExport } from '../index';
 
 config();
 
@@ -31,6 +32,10 @@ describe('generateBaselineSql', () => {
   afterAll(async () => {
     await runSqlFile(pool, cleanupFile);
     await pool.end();
+  });
+
+  test('is exported from the package root', () => {
+    expect(rootExport).toBe(generateBaselineSql);
   });
 
   test('header, schema creation, and normalization', () => {
