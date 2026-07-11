@@ -48,6 +48,20 @@ describe('generateBaselineSql', () => {
     expect(baseline).not.toContain('orders_id_seq');
   });
 
+  test('types: enums, domains, composites in unified topo order with safe guards', () => {
+    expect(baseline).toContain("AS ENUM ('pending', 'paid', 'cancelled')");
+    expect(baseline).toContain("'it''s'");
+    expect(baseline).toContain('CREATE DOMAIN db_pull_schema.positive_int AS integer');
+    expect(baseline).toContain('CHECK ((VALUE > 0))');
+    expect(baseline).toContain('AS (amount numeric, currency text)');
+    expect(baseline).toContain('db_pull_schema.money_pair[]');
+    expect(baseline.indexOf('CREATE TYPE db_pull_schema.money_pair')).toBeLessThan(
+      baseline.indexOf('CREATE TYPE db_pull_schema.money_bag')
+    );
+    expect(baseline).toContain('DO $supalite$');
+    expect(baseline).toContain('EXCEPTION WHEN duplicate_object');
+  });
+
   test('header, schema creation, and normalization', () => {
     expect(baseline).toContain('-- supalite db pull baseline');
     expect(baseline).toContain('SET check_function_bodies = off;');
