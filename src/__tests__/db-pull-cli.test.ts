@@ -75,6 +75,10 @@ describe('supalite db pull CLI', () => {
     const result = await runCli(['db', 'pull', '--db-url', connectionString, '--mode', 'diff']);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('Only --mode baseline is supported in this version (diff is planned).');
+    // mode is validated before the URL so the message is exact even without one
+    const noUrl = await runCli(['db', 'pull', '--mode', 'diff']);
+    expect(noUrl.code).toBe(1);
+    expect(noUrl.stderr).toContain('Only --mode baseline is supported in this version (diff is planned).');
   });
 
   test('default out path creates supabase/migrations/<UTC ts>_baseline.sql in cwd', async () => {

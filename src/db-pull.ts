@@ -14,8 +14,15 @@ type DeferredDomainConstraint = {
   definition: string;
 };
 
+type DeferredColumnDefault = {
+  statement: string;
+  functionOids: string[];
+  label: string;
+};
+
 type PullState = {
-  deferredColumnDefaults: string[];
+  deferredColumnDefaults: DeferredColumnDefault[];
+  divertedRelations: Set<string>;
   deferredDomainDefaults: string[];
   deferredDomainConstraints: DeferredDomainConstraint[];
   generatedColumnFunctionDeps: Array<{ qualifiedRaw: string; column: string; functionOids: string[] }>;
@@ -27,6 +34,7 @@ type PullState = {
 // diverted to the footer instead of emitting DDL that would fail (FR-016).
 type Exclusion = {
   relations: Map<string, string>; // oid -> qualified name
+  rowtypes: Map<string, string>; // excluded relation row-type oid -> qualified name
   functions: Map<string, string>; // oid -> qualified name (aggregates/window, extension-owned)
 };
 
@@ -62,32 +70,40 @@ const extensionFilter = (ctx: Ctx, classCatalog: string, oidExpr: string): strin
     : '';
 
 // Kahn topological sort; edges are [prerequisite, dependent] pairs keyed by
-// key(). Items involved in a cycle are appended in input order (never lost).
+// key(). Deterministic: among ready nodes the one earliest in the input order
+// is emitted first. Items involved in a cycle are appended in input order.
 const topoSort = <T>(items: T[], key: (item: T) => string, edges: Array<[string, string]>): T[] => {
   const byKey = new Map(items.map((item) => [key(item), item]));
+  const rank = new Map(items.map((item, index) => [key(item), index]));
   const indegree = new Map<string, number>(items.map((item) => [key(item), 0]));
-  const dependents = new Map<string, string[]>();
+  const dependents = new Map<string, Set<string>>();
   edges.forEach(([from, to]) => {
     if (!byKey.has(from) || !byKey.has(to) || from === to) {
       return;
     }
+    const existing = dependents.get(from) ?? new Set<string>();
+    if (existing.has(to)) {
+      return;
+    }
+    existing.add(to);
+    dependents.set(from, existing);
     indegree.set(to, (indegree.get(to) as number) + 1);
-    dependents.set(from, [...(dependents.get(from) ?? []), to]);
   });
-  const queue = items.map(key).filter((k) => indegree.get(k) === 0);
+  const ready = items.map(key).filter((k) => indegree.get(k) === 0);
   const ordered: T[] = [];
   const seen = new Set<string>();
-  while (queue.length > 0) {
-    const k = queue.shift() as string;
+  while (ready.length > 0) {
+    ready.sort((a, b) => (rank.get(a) as number) - (rank.get(b) as number));
+    const k = ready.shift() as string;
     if (seen.has(k)) {
       continue;
     }
     seen.add(k);
     ordered.push(byKey.get(k) as T);
-    (dependents.get(k) ?? []).forEach((dep) => {
+    (dependents.get(k) ?? new Set<string>()).forEach((dep) => {
       indegree.set(dep, (indegree.get(dep) as number) - 1);
       if (indegree.get(dep) === 0) {
-        queue.push(dep);
+        ready.push(dep);
       }
     });
   }
@@ -98,6 +114,10 @@ const topoSort = <T>(items: T[], key: (item: T) => string, edges: Array<[string,
   });
   return ordered;
 };
+
+// Identifiers can legally contain newlines; anything interpolated into a SQL
+// comment must stay on one line or it would escape the comment.
+const commentSafe = (text: string): string => text.replace(/\r?\n|\r/g, ' ');
 
 const countObjects = async (ctx: Ctx): Promise<number> => {
   const { rows } = await ctx.client.query<{ total: string }>(
@@ -236,6 +256,24 @@ const createTypeResolver = async (
   };
   const relkindOf = (oid: string): string => resolveMap.get(oid)?.relkind ?? '';
   return { resolveRef, relkindOf };
+};
+
+// Default MIN/MAXVALUE of an identity sequence for the column's type; render
+// the bound only when it differs (FR-009 non-default options).
+const identityDefaultBounds = (
+  dataType: string,
+  ascending: boolean
+): { min: string; max: string } | null => {
+  const limits: Record<string, { min: string; max: string }> = {
+    smallint: { min: '-32768', max: '32767' },
+    integer: { min: '-2147483648', max: '2147483647' },
+    bigint: { min: '-9223372036854775808', max: '9223372036854775807' },
+  };
+  const limit = limits[dataType];
+  if (!limit) {
+    return null;
+  }
+  return ascending ? { min: '1', max: limit.max } : { min: limit.min, max: '-1' };
 };
 
 const wrapDuplicateGuard = (statement: string): string => {
@@ -460,12 +498,14 @@ const renderTables = async (ctx: Ctx): Promise<string[]> => {
     default_expr: string | null;
     default_uses_function: boolean;
     default_function_oids: string[] | null;
-    collation_quoted: string | null;
+    collation_qualified: string | null;
     collation_differs: boolean;
     identity_start: string | null;
     identity_increment: string | null;
     identity_cache: string | null;
     identity_cycle: boolean | null;
+    identity_min: string | null;
+    identity_max: string | null;
   };
 
   const columnsByTable = new Map<string, ColumnRow[]>();
@@ -489,21 +529,26 @@ const renderTables = async (ctx: Ctx): Promise<string[]> => {
                   AND fdep.refclassid = 'pg_proc'::regclass
                   AND fns.nspname NOT IN ('pg_catalog', 'information_schema')
               ) END AS default_function_oids,
-              quote_ident(col.collname) AS collation_quoted,
+              CASE WHEN col.oid IS NOT NULL THEN format('%I.%I', coll_ns.nspname, col.collname) END AS collation_qualified,
               (a.attcollation <> 0 AND a.attcollation <> typ.typcollation) AS collation_differs,
               iseq.start AS identity_start,
               iseq.increment AS identity_increment,
               iseq.cache AS identity_cache,
-              iseq.cycle AS identity_cycle
+              iseq.cycle AS identity_cycle,
+              iseq.min AS identity_min,
+              iseq.max AS identity_max
        FROM pg_attribute a
        JOIN pg_type typ ON typ.oid = a.atttypid
        LEFT JOIN pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
        LEFT JOIN pg_collation col ON col.oid = a.attcollation
+       LEFT JOIN pg_namespace coll_ns ON coll_ns.oid = col.collnamespace
        LEFT JOIN LATERAL (
          SELECT s.seqstart::text AS start,
                 s.seqincrement::text AS increment,
                 s.seqcache::text AS cache,
-                s.seqcycle AS cycle
+                s.seqcycle AS cycle,
+                s.seqmin::text AS min,
+                s.seqmax::text AS max
          FROM pg_depend idep
          JOIN pg_sequence s ON s.seqrelid = idep.objid
          WHERE idep.classid = 'pg_class'::regclass
@@ -523,8 +568,25 @@ const renderTables = async (ctx: Ctx): Promise<string[]> => {
   columnsByTable.forEach((columns) => columns.forEach((col) => columnTypeOids.add(col.type_oid)));
   const { resolveRef } = await createTypeResolver(ctx, Array.from(columnTypeOids));
   const tableByRowtype = new Map(tables.map((table) => [table.rowtype_oid, table.oid]));
+
+  // Tables whose columns reference an excluded relation's row type cannot
+  // replay — divert them (and everything attached, via divertedRelations).
+  const emittedTables = tables.filter((table) => {
+    const hit = (columnsByTable.get(table.oid) ?? []).find((col) =>
+      ctx.exclusion.rowtypes.has(resolveRef(col.type_oid))
+    );
+    if (hit) {
+      ctx.state.divertedRelations.add(table.oid);
+      ctx.state.footerDiverted.push(
+        `table with a column referencing an excluded relation row type (not emitted): ${table.qualified_raw}`
+      );
+      return false;
+    }
+    return true;
+  });
+
   const edges: Array<[string, string]> = [];
-  tables.forEach((table) => {
+  emittedTables.forEach((table) => {
     (columnsByTable.get(table.oid) ?? []).forEach((col) => {
       const target = tableByRowtype.get(resolveRef(col.type_oid));
       if (target && target !== table.oid) {
@@ -533,11 +595,11 @@ const renderTables = async (ctx: Ctx): Promise<string[]> => {
     });
   });
 
-  const statements = topoSort(tables, (table) => table.oid, edges).map((table) => {
+  const statements = topoSort(emittedTables, (table) => table.oid, edges).map((table) => {
     const columnLines = (columnsByTable.get(table.oid) ?? []).map((col) => {
       const parts = [`${col.name} ${col.data_type}`];
-      if (col.collation_differs && col.collation_quoted) {
-        parts.push(`COLLATE ${col.collation_quoted}`);
+      if (col.collation_differs && col.collation_qualified) {
+        parts.push(`COLLATE ${col.collation_qualified}`);
       }
       if (col.generated === 's') {
         parts.push(`GENERATED ALWAYS AS (${col.default_expr}) STORED`);
@@ -560,6 +622,14 @@ const renderTables = async (ctx: Ctx): Promise<string[]> => {
         if (col.identity_cache && col.identity_cache !== '1') {
           opts.push(`CACHE ${col.identity_cache}`);
         }
+        const ascending = !(col.identity_increment ?? '1').startsWith('-');
+        const bounds = identityDefaultBounds(col.data_type, ascending);
+        if (col.identity_min && bounds && col.identity_min !== bounds.min) {
+          opts.push(`MINVALUE ${col.identity_min}`);
+        }
+        if (col.identity_max && bounds && col.identity_max !== bounds.max) {
+          opts.push(`MAXVALUE ${col.identity_max}`);
+        }
         if (col.identity_cycle) {
           opts.push('CYCLE');
         }
@@ -569,9 +639,11 @@ const renderTables = async (ctx: Ctx): Promise<string[]> => {
         parts.push(identity);
       } else if (col.default_expr) {
         if (col.default_uses_function) {
-          ctx.state.deferredColumnDefaults.push(
-            `ALTER TABLE ${table.schema}.${table.name} ALTER COLUMN ${col.name} SET DEFAULT ${col.default_expr};`
-          );
+          ctx.state.deferredColumnDefaults.push({
+            statement: `ALTER TABLE ${table.schema}.${table.name} ALTER COLUMN ${col.name} SET DEFAULT ${col.default_expr};`,
+            functionOids: col.default_function_oids ?? [],
+            label: `${table.qualified_raw}.${col.name}`,
+          });
         } else {
           parts.push(`DEFAULT ${col.default_expr}`);
         }
@@ -600,6 +672,7 @@ const renderSequenceOwnership = async (ctx: Ctx): Promise<string[]> => {
     seq_name: string;
     table_schema: string;
     table_name: string;
+    table_oid: string;
     column_name: string;
     seq_qualified_raw: string;
     table_qualified_raw: string;
@@ -609,6 +682,7 @@ const renderSequenceOwnership = async (ctx: Ctx): Promise<string[]> => {
             quote_ident(sc.relname) AS seq_name,
             quote_ident(tn.nspname) AS table_schema,
             quote_ident(tc.relname) AS table_name,
+            tc.oid::text AS table_oid,
             quote_ident(a.attname) AS column_name,
             format('%I.%I', sn.nspname, sc.relname) AS seq_qualified_raw,
             format('%I.%I', tn.nspname, tc.relname) AS table_qualified_raw,
@@ -628,10 +702,11 @@ const renderSequenceOwnership = async (ctx: Ctx): Promise<string[]> => {
      ORDER BY sn.nspname, sc.relname`,
     [ctx.schemas]
   );
-  if (rows.length === 0) {
+  const emittable = rows.filter((row) => !ctx.state.divertedRelations.has(row.table_oid));
+  if (emittable.length === 0) {
     return [];
   }
-  const statements = rows.map((row) => {
+  const statements = emittable.map((row) => {
     const alter = `ALTER SEQUENCE ${row.seq_schema}.${row.seq_name} OWNED BY ${row.table_schema}.${row.table_name}.${row.column_name};`;
     if (!ctx.ifNotExists) {
       return alter;
@@ -655,8 +730,8 @@ const computeExclusion = async (ctx: Ctx): Promise<Exclusion> => {
            AND ext_dep.deptype = 'e'
        )`
     : '';
-  const { rows: relations } = await ctx.client.query<{ oid: string; qualified: string }>(
-    `SELECT c.oid::text AS oid, format('%I.%I', n.nspname, c.relname) AS qualified
+  const { rows: relations } = await ctx.client.query<{ oid: string; rowtype_oid: string; qualified: string }>(
+    `SELECT c.oid::text AS oid, c.reltype::text AS rowtype_oid, format('%I.%I', n.nspname, c.relname) AS qualified
      FROM pg_class c
      JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE n.nspname = ANY($1)
@@ -681,30 +756,45 @@ const computeExclusion = async (ctx: Ctx): Promise<Exclusion> => {
   );
   return {
     relations: new Map(relations.map((row) => [row.oid, row.qualified])),
+    rowtypes: new Map(relations.map((row) => [row.rowtype_oid, row.qualified])),
     functions: new Map(functions.map((row) => [row.oid, row.qualified])),
   };
 };
 
-const renderConstraints = async (ctx: Ctx): Promise<{ constraints: string[]; foreignKeys: string[] }> => {
+const renderConstraints = async (
+  ctx: Ctx,
+  stageByOid: Map<string, FunctionStage>
+): Promise<{ constraints: string[]; foreignKeys: string[] }> => {
   const { rows } = await ctx.client.query<{
     schema: string;
     table_name: string;
+    table_oid: string;
     name: string;
     raw_name: string;
     qualified_raw: string;
     type: string;
     definition: string;
+    function_oids: string[] | null;
     ref_oid: string | null;
     ref_schema_raw: string | null;
     ref_qualified: string | null;
   }>(
     `SELECT quote_ident(n.nspname) AS schema,
             quote_ident(cl.relname) AS table_name,
+            cl.oid::text AS table_oid,
             quote_ident(con.conname) AS name,
             con.conname AS raw_name,
             format('%I.%I', n.nspname, cl.relname) AS qualified_raw,
             con.contype AS type,
             pg_get_constraintdef(con.oid) AS definition,
+            (SELECT array_agg(fdep.refobjid::text)
+             FROM pg_depend fdep
+             JOIN pg_proc fproc ON fproc.oid = fdep.refobjid
+             JOIN pg_namespace fns ON fns.oid = fproc.pronamespace
+             WHERE fdep.classid = 'pg_constraint'::regclass
+               AND fdep.objid = con.oid
+               AND fdep.refclassid = 'pg_proc'::regclass
+               AND fns.nspname NOT IN ('pg_catalog', 'information_schema')) AS function_oids,
             NULLIF(con.confrelid, 0)::text AS ref_oid,
             fn.nspname AS ref_schema_raw,
             CASE WHEN con.confrelid <> 0 THEN format('%I.%I', fn.nspname, fcl.relname) END AS ref_qualified
@@ -719,6 +809,7 @@ const renderConstraints = async (ctx: Ctx): Promise<{ constraints: string[]; for
        AND cl.relkind = 'r'
        AND NOT cl.relispartition
        ${extensionFilter(ctx, 'pg_class', 'cl.oid')}
+       ${extensionFilter(ctx, 'pg_constraint', 'con.oid')}
      ORDER BY n.nspname, cl.relname, con.conname`,
     [ctx.schemas]
   );
@@ -743,6 +834,15 @@ const renderConstraints = async (ctx: Ctx): Promise<{ constraints: string[]; for
   const constraints: string[] = [];
   const foreignKeys: string[] = [];
   rows.forEach((row) => {
+    if (ctx.state.divertedRelations.has(row.table_oid)) {
+      return;
+    }
+    if ((row.function_oids ?? []).some((oid) => stageByOid.get(oid) === 'view')) {
+      ctx.state.footerDiverted.push(
+        `constraint calling a view-stage function (not emitted): ${row.qualified_raw}.${row.raw_name}`
+      );
+      return;
+    }
     if (row.type !== 'f') {
       constraints.push(renderOne(row));
       return;
@@ -781,7 +881,13 @@ const renderConstraints = async (ctx: Ctx): Promise<{ constraints: string[]; for
 
 type FunctionStage = 'type' | 'table' | 'view';
 
-type ClassifiedFunction = { oid: string; definition: string; stage: FunctionStage };
+type ClassifiedFunction = {
+  oid: string;
+  definition: string;
+  stage: FunctionStage;
+  qualified: string;
+  excluded: boolean;
+};
 
 // Stage functions by what their SIGNATURES reference (bodies are deferred by
 // check_function_bodies = off): no relation row types -> 'type' (before
@@ -791,11 +897,13 @@ const classifyFunctions = async (ctx: Ctx): Promise<ClassifiedFunction[]> => {
   const { rows: fns } = await ctx.client.query<{
     oid: string;
     definition: string;
+    qualified: string;
     rettype: string;
     argtypes: string[];
   }>(
     `SELECT p.oid::text AS oid,
             pg_get_functiondef(p.oid) AS definition,
+            format('%I.%I', n.nspname, p.proname) AS qualified,
             p.prorettype::text AS rettype,
             ARRAY(SELECT unnest(COALESCE(p.proallargtypes, p.proargtypes::oid[]))::text) AS argtypes
      FROM pg_proc p
@@ -806,15 +914,22 @@ const classifyFunctions = async (ctx: Ctx): Promise<ClassifiedFunction[]> => {
      ORDER BY n.nspname, p.proname, p.oid`,
     [ctx.schemas]
   );
-  const info = new Map<string, { elem: string; relkind: string; attrs: string[] }>();
+  const info = new Map<string, { elem: string; relkind: string; relid: string; attrs: string[] }>();
   let frontier: string[] = [];
   fns.forEach((fn) => frontier.push(fn.rettype, ...fn.argtypes));
   frontier = Array.from(new Set(frontier.filter((oid) => oid !== '0')));
   while (frontier.length > 0) {
-    const { rows } = await ctx.client.query<{ oid: string; elem: string; relkind: string; attrs: string[] }>(
+    const { rows } = await ctx.client.query<{
+      oid: string;
+      elem: string;
+      relkind: string;
+      relid: string;
+      attrs: string[];
+    }>(
       `SELECT t.oid::text AS oid,
               t.typelem::text AS elem,
               COALESCE(c.relkind::text, '') AS relkind,
+              COALESCE(c.oid::text, '') AS relid,
               CASE WHEN c.relkind = 'c' THEN ARRAY(
                 SELECT a.atttypid::text FROM pg_attribute a
                 WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped)
@@ -835,10 +950,12 @@ const classifyFunctions = async (ctx: Ctx): Promise<ClassifiedFunction[]> => {
     });
     frontier = Array.from(next);
   }
-  const stageOf = (fn: { rettype: string; argtypes: string[] }): FunctionStage => {
+  const classify = (fn: { rettype: string; argtypes: string[] }): { stage: FunctionStage; excluded: boolean } => {
     const seen = new Set<string>();
     const stack = [fn.rettype, ...fn.argtypes];
     let hasTable = false;
+    let hasView = false;
+    let excluded = false;
     while (stack.length > 0) {
       const oid = stack.pop() as string;
       if (oid === '0' || seen.has(oid)) {
@@ -849,8 +966,11 @@ const classifyFunctions = async (ctx: Ctx): Promise<ClassifiedFunction[]> => {
       if (!typeInfo) {
         continue;
       }
+      if (typeInfo.relid !== '' && ctx.exclusion.relations.has(typeInfo.relid)) {
+        excluded = true;
+      }
       if (typeInfo.relkind === 'v' || typeInfo.relkind === 'm') {
-        return 'view';
+        hasView = true;
       }
       if (['r', 'p', 'f'].includes(typeInfo.relkind)) {
         hasTable = true;
@@ -860,9 +980,13 @@ const classifyFunctions = async (ctx: Ctx): Promise<ClassifiedFunction[]> => {
       }
       typeInfo.attrs.forEach((attr) => stack.push(attr));
     }
-    return hasTable ? 'table' : 'type';
+    const stage: FunctionStage = hasView ? 'view' : hasTable ? 'table' : 'type';
+    return { stage, excluded };
   };
-  return fns.map((fn) => ({ oid: fn.oid, definition: fn.definition, stage: stageOf(fn) }));
+  return fns.map((fn) => {
+    const { stage, excluded } = classify(fn);
+    return { oid: fn.oid, definition: fn.definition, qualified: fn.qualified, stage, excluded };
+  });
 };
 
 const FUNCTION_STAGE_BANNERS: Record<FunctionStage, string> = {
@@ -879,15 +1003,25 @@ const renderFunctionStage = (functions: ClassifiedFunction[], stage: FunctionSta
   return [FUNCTION_STAGE_BANNERS[stage], ...defs.map((fn) => `${normalizeLf(fn.definition.trim())};`)];
 };
 
-const renderDeferredDefaults = (ctx: Ctx): string[] => {
-  const statements = [...ctx.state.deferredColumnDefaults, ...ctx.state.deferredDomainDefaults];
+const renderDeferredDefaults = (ctx: Ctx, stageByOid: Map<string, FunctionStage>): string[] => {
+  const statements: string[] = [];
+  ctx.state.deferredColumnDefaults.forEach((deferred) => {
+    if (deferred.functionOids.some((oid) => stageByOid.get(oid) === 'view')) {
+      ctx.state.footerDiverted.push(
+        `column default calling a view-stage function (not emitted): ${deferred.label}`
+      );
+      return;
+    }
+    statements.push(deferred.statement);
+  });
+  statements.push(...ctx.state.deferredDomainDefaults);
   if (statements.length === 0) {
     return [];
   }
   return ['-- deferred column defaults', ...statements];
 };
 
-const renderViews = async (ctx: Ctx): Promise<string[]> => {
+const renderViews = async (ctx: Ctx, viewStageFunctionOids: Set<string>): Promise<string[]> => {
   const { rows: views } = await ctx.client.query<{
     oid: string;
     schema: string;
@@ -948,8 +1082,12 @@ const renderViews = async (ctx: Ctx): Promise<string[]> => {
       }
       const hit = (depsByView.get(view.oid) ?? []).some(
         (dep) =>
-          (dep.ref_class === 'pg_class' && (ctx.exclusion.relations.has(dep.ref_oid) || diverted.has(dep.ref_oid))) ||
-          (dep.ref_class === 'pg_proc' && ctx.exclusion.functions.has(dep.ref_oid))
+          (dep.ref_class === 'pg_class' &&
+            (ctx.exclusion.relations.has(dep.ref_oid) ||
+              ctx.state.divertedRelations.has(dep.ref_oid) ||
+              diverted.has(dep.ref_oid))) ||
+          (dep.ref_class === 'pg_proc' &&
+            (ctx.exclusion.functions.has(dep.ref_oid) || viewStageFunctionOids.has(dep.ref_oid)))
       );
       if (hit) {
         diverted.add(view.oid);
@@ -995,11 +1133,13 @@ const renderViews = async (ctx: Ctx): Promise<string[]> => {
 const renderTriggers = async (ctx: Ctx): Promise<string[]> => {
   const { rows } = await ctx.client.query<{
     raw_name: string;
+    table_oid: string;
     table_qualified_raw: string;
     is_constraint: boolean;
     definition: string;
   }>(
     `SELECT t.tgname AS raw_name,
+            c.oid::text AS table_oid,
             format('%I.%I', n.nspname, c.relname) AS table_qualified_raw,
             (t.tgconstraint <> 0) AS is_constraint,
             pg_get_triggerdef(t.oid) AS definition
@@ -1009,15 +1149,17 @@ const renderTriggers = async (ctx: Ctx): Promise<string[]> => {
      WHERE n.nspname = ANY($1)
        AND NOT t.tgisinternal
        AND NOT c.relispartition
+       AND c.relkind <> 'p'
        ${extensionFilter(ctx, 'pg_trigger', 't.oid')}
        ${extensionFilter(ctx, 'pg_class', 'c.oid')}
      ORDER BY n.nspname, c.relname, t.tgname`,
     [ctx.schemas]
   );
-  if (rows.length === 0) {
+  const emittable = rows.filter((row) => !ctx.state.divertedRelations.has(row.table_oid));
+  if (emittable.length === 0) {
     return [];
   }
-  const statements = rows.map((row) => {
+  const statements = emittable.map((row) => {
     const definition = `${normalizeLf(row.definition.trim())};`;
     if (!ctx.ifNotExists) {
       return definition;
@@ -1035,8 +1177,9 @@ const renderTriggers = async (ctx: Ctx): Promise<string[]> => {
 };
 
 const renderIndexes = async (ctx: Ctx): Promise<string[]> => {
-  const { rows } = await ctx.client.query<{ definition: string }>(
-    `SELECT pg_get_indexdef(i.indexrelid) AS definition
+  const { rows } = await ctx.client.query<{ definition: string; table_oid: string }>(
+    `SELECT pg_get_indexdef(i.indexrelid) AS definition,
+            tc.oid::text AS table_oid
      FROM pg_index i
      JOIN pg_class ic ON ic.oid = i.indexrelid
      JOIN pg_class tc ON tc.oid = i.indrelid
@@ -1050,10 +1193,11 @@ const renderIndexes = async (ctx: Ctx): Promise<string[]> => {
      ORDER BY pg_get_indexdef(i.indexrelid)`,
     [ctx.schemas]
   );
-  if (rows.length === 0) {
+  const emittable = rows.filter((row) => !ctx.state.divertedRelations.has(row.table_oid));
+  if (emittable.length === 0) {
     return [];
   }
-  const statements = rows.map((row) => {
+  const statements = emittable.map((row) => {
     let definition = normalizeLf(row.definition.trim());
     if (ctx.ifNotExists) {
       definition = definition
@@ -1122,11 +1266,11 @@ const renderFooter = async (ctx: Ctx): Promise<string[]> => {
   ];
   if (unsupported.length > 0) {
     lines.push('-- not included in this baseline (v1 limitations):');
-    unsupported.forEach((entry) => lines.push(`--   ${entry}`));
+    unsupported.forEach((entry) => lines.push(`--   ${commentSafe(entry)}`));
   }
   if (ctx.state.externalRefs.length > 0) {
     lines.push('-- references outside the selected schemas (must pre-exist before applying):');
-    ctx.state.externalRefs.forEach((entry) => lines.push(`--   ${entry}`));
+    ctx.state.externalRefs.forEach((entry) => lines.push(`--   ${commentSafe(entry)}`));
   }
   return lines;
 };
@@ -1143,43 +1287,61 @@ export const generateBaselineSql = async (options: DbPullOptions): Promise<strin
       ifNotExists: options.ifNotExists ?? true,
       state: {
         deferredColumnDefaults: [],
+        divertedRelations: new Set(),
         deferredDomainDefaults: [],
         deferredDomainConstraints: [],
         generatedColumnFunctionDeps: [],
         footerDiverted: [],
         externalRefs: [],
       },
-      exclusion: { relations: new Map(), functions: new Map() },
+      exclusion: { relations: new Map(), rowtypes: new Map(), functions: new Map() },
     };
+    // Consistent catalog snapshot + fully schema-qualified deparse output
+    // (pg_get_*/format_type omit qualification for schemas on search_path).
+    await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    await client.query(`SET LOCAL search_path TO ''`);
     ctx.exclusion = await computeExclusion(ctx);
     const header = [
       '-- supalite db pull baseline',
       `-- generated at: ${new Date().toISOString()}`,
-      `-- schemas: ${schemas.join(', ')}`,
+      `-- schemas: ${commentSafe(schemas.join(', '))}`,
       '',
       'SET check_function_bodies = off;',
     ];
     if ((await countObjects(ctx)) === 0) {
       console.warn(`Warning: no objects found in schema(s) ${schemas.join(', ')}.`);
+      await client.query('COMMIT');
       return normalizeLf(`${header.join('\n')}\n`);
     }
     const functions = await classifyFunctions(ctx);
     const functionStageByOid = new Map(functions.map((fn) => [fn.oid, fn.stage]));
+    const activeFunctions = functions.filter((fn) => {
+      if (!fn.excluded) {
+        return true;
+      }
+      ctx.state.footerDiverted.push(
+        `function whose signature references an excluded relation (not emitted): ${fn.qualified}`
+      );
+      return false;
+    });
+    const viewStageFunctionOids = new Set(
+      activeFunctions.filter((fn) => fn.stage === 'view').map((fn) => fn.oid)
+    );
     const sections: string[][] = [];
     sections.push(await renderSchemas(ctx));
     sections.push(await renderExtensions(ctx));
     sections.push(await renderSequences(ctx));
     sections.push(await renderTypes(ctx));
-    sections.push(renderFunctionStage(functions, 'type'));
+    sections.push(renderFunctionStage(activeFunctions, 'type'));
     sections.push(await renderTables(ctx));
     sections.push(await renderSequenceOwnership(ctx));
-    sections.push(renderFunctionStage(functions, 'table'));
-    sections.push(renderDeferredDefaults(ctx));
-    const constraintSections = await renderConstraints(ctx);
+    sections.push(renderFunctionStage(activeFunctions, 'table'));
+    sections.push(renderDeferredDefaults(ctx, functionStageByOid));
+    const constraintSections = await renderConstraints(ctx, functionStageByOid);
     sections.push(constraintSections.constraints);
     sections.push(constraintSections.foreignKeys);
-    sections.push(await renderViews(ctx));
-    sections.push(renderFunctionStage(functions, 'view'));
+    sections.push(await renderViews(ctx, viewStageFunctionOids));
+    sections.push(renderFunctionStage(activeFunctions, 'view'));
     sections.push(await renderTriggers(ctx));
     sections.push(await renderIndexes(ctx));
     sections.push(await renderFooter(ctx));
@@ -1197,6 +1359,7 @@ export const generateBaselineSql = async (options: DbPullOptions): Promise<strin
       .filter((section) => section.length > 0)
       .map((section) => section.join('\n'))
       .join('\n\n');
+    await client.query('COMMIT');
     return normalizeLf(`${header.join('\n')}\n${body ? `\n${body}\n` : ''}`);
   } finally {
     await client.end();

@@ -292,14 +292,14 @@ const runDbPull = async (rawArgs: string[]): Promise<void> => {
     process.exit(0);
   }
 
+  if (parsed.mode !== 'baseline') {
+    console.error('Only --mode baseline is supported in this version (diff is planned).');
+    process.exit(1);
+  }
   const dbUrl = parsed.dbUrl || process.env.DB_CONNECTION;
   if (!dbUrl) {
     console.error('Missing --db-url (or DB_CONNECTION env var).');
     printDbPullUsage();
-    process.exit(1);
-  }
-  if (parsed.mode !== 'baseline') {
-    console.error('Only --mode baseline is supported in this version (diff is planned).');
     process.exit(1);
   }
 
