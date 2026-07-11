@@ -70,19 +70,27 @@ start with a `-- <section>` banner line (used by ordering tests). Order:
 |---|----------|--------------------|-----------------------|
 | 1 | header | — | `SET check_function_bodies = off;` (pg_dump technique) |
 | 2 | schemas | `pg_namespace` (selected minus `public`, PLUS extension target namespaces) | `IF NOT EXISTS` — always, even in plain mode |
-| 3 | extensions | `pg_extension` (skip `plpgsql`), `ORDER BY oid` (creation order ≈ dependency order); versions not pinned | `IF NOT EXISTS` — always, even in plain mode |
+| 3 | extensions | `pg_extension` (skip `plpgsql`), Kahn topo-sort over extension→extension `pg_depend` edges, oid tie-break; versions not pinned | `IF NOT EXISTS` — always, even in plain mode |
 | 4 | sequences | `pg_sequence` minus identity-internal (`pg_depend` `deptype='i'`); options always rendered | `IF NOT EXISTS` |
-| 5 | types | enums `pg_enum`; composites `pg_class relkind='c'`, Kahn topo-sort over attribute-type edges (composite-on-composite) | `DO $$ ... EXCEPTION WHEN duplicate_object` |
-| 6 | tables | `pg_attribute` + `pg_attrdef` + identity-seq lateral join; `relkind='r' AND NOT relispartition`; `relpersistence='u'` → `CREATE UNLOGGED TABLE`; CHECKs NOT inlined; defaults whose `adbin` depends on a user function (`pg_depend` → `pg_proc`) are stripped and deferred to §9 | `IF NOT EXISTS` |
-| 7 | sequence ownership | `pg_depend` `deptype='a'` → `ALTER SEQUENCE ... OWNED BY` | naturally idempotent |
-| 8 | functions | `pg_proc prokind IN ('f','p')` + `pg_get_functiondef` + `;` | server emits `CREATE OR REPLACE` |
-| 9 | deferred column defaults | defaults stripped in §6 → `ALTER TABLE ... ALTER COLUMN ... SET DEFAULT <pg_get_expr>` | naturally idempotent (SET DEFAULT overwrites) |
-| 10 | constraints (PK/UNIQUE/CHECK/EXCLUDE) | `pg_constraint` + `pg_get_constraintdef` (CHECKs may call user functions → after §8) | `DO $$` guard on `conname` + `conrelid::regclass` |
-| 11 | foreign keys | same, `contype='f'`, after ALL tables | same `DO $$` guard |
-| 12 | views | `relkind IN ('v','m')` + `pg_get_viewdef(oid, true)`, Kahn topo-sort over `pg_rewrite`/`pg_depend` view→view edges; view `reloptions` rendered (`security_barrier`, `check_option`); matview `WITH NO DATA` when `NOT relispopulated` | `CREATE OR REPLACE VIEW` / matview `IF NOT EXISTS` |
-| 13 | triggers | `pg_trigger NOT tgisinternal` + `pg_get_triggerdef`; after views for `INSTEAD OF` triggers | plain triggers → `CREATE OR REPLACE TRIGGER` (PG14+); constraint triggers (`tgconstraint <> 0`) → `DO $$` existence guard (OR REPLACE unsupported for them) |
-| 14 | indexes | `pg_index` + `pg_get_indexdef` on relations `relkind IN ('r','m') AND NOT relispartition`, excluding constraint-backing (`pg_constraint.conindid`, incl. EXCLUDE); after views so matview indexes resolve | textual `IF NOT EXISTS` insertion (`CREATE [UNIQUE] INDEX`) |
-| 15 | footer | partition hierarchies (`relkind='p'` parents + `relispartition` leaves), aggregates/window (`prokind IN ('a','w')`), domains (`typtype='d'`), non-reproduced table/view variants (typed/inherited tables, non-default AM/tablespace/storage/replica identity), external FK refs | comment block |
+| 5 | types | enums `pg_enum`; domains `typtype='d'` (base type, default, NOT NULL, `pg_get_constraintdef` CHECKs); composites `relkind='c'`; ONE unified Kahn topo-sort with edges through attribute/base types, resolving arrays via `pg_type.typelem` | `DO $$ ... EXCEPTION WHEN duplicate_object` (safe dollar tag) |
+| 6 | functions — type stage | `pg_proc prokind IN ('f','p')` whose signature types (prorettype + proargtypes, arrays resolved) reference NO relation row types + `pg_get_functiondef` + `;` | server emits `CREATE OR REPLACE` |
+| 7 | tables | `pg_attribute` + `pg_attrdef` + identity-seq lateral join; `relkind='r' AND NOT relispartition`; Kahn topo-sort over column-row-type edges (table-uses-table); `relpersistence='u'` → UNLOGGED; non-default `attcollation` → `COLLATE`; CHECKs NOT inlined; defaults whose `adbin` depends on a user function are stripped and deferred to §10 | `IF NOT EXISTS` |
+| 8 | sequence ownership | `pg_depend` `deptype='a'` → `ALTER SEQUENCE ... OWNED BY` | naturally idempotent |
+| 9 | functions — table stage | remaining functions whose signatures reference table/composite-of-table row types (but no view row types) | server emits `CREATE OR REPLACE` |
+| 10 | deferred column defaults | defaults stripped in §7 → `ALTER TABLE ... ALTER COLUMN ... SET DEFAULT <pg_get_expr>` | naturally idempotent (SET DEFAULT overwrites) |
+| 11 | constraints (PK/UNIQUE/CHECK/EXCLUDE) | `pg_constraint` + `pg_get_constraintdef` (CHECKs may call user functions → after §9) | `DO` guard on `conname` + `conrelid::regclass` (safe dollar tag) |
+| 12 | foreign keys | same, `contype='f'`, after ALL tables; FKs whose `confrelid` is an excluded relation (partition parent, extension-owned, outside-selection-and-absent) → footer instead of executable DDL | same `DO` guard |
+| 13 | views | `relkind IN ('v','m')` + `pg_get_viewdef(oid, true)`, Kahn topo-sort over `pg_rewrite`/`pg_depend` view→view edges; view `reloptions` rendered (`security_barrier`, `check_option`); matview `WITH NO DATA` when `NOT relispopulated`; views depending on excluded aggregates → footer, not emitted | `CREATE OR REPLACE VIEW` / matview `IF NOT EXISTS` |
+| 14 | functions — view stage | remaining functions whose signatures reference view row types | server emits `CREATE OR REPLACE` |
+| 15 | triggers | `pg_trigger NOT tgisinternal` + `pg_get_triggerdef`; after views for `INSTEAD OF` triggers | plain triggers → `CREATE OR REPLACE TRIGGER` (PG14+); constraint triggers (`tgconstraint <> 0`) → `DO` existence guard (OR REPLACE unsupported for them) |
+| 16 | indexes | `pg_index` + `pg_get_indexdef` on relations `relkind IN ('r','m') AND NOT relispartition`, excluding constraint-backing (`pg_constraint.conindid`, incl. EXCLUDE); after views so matview indexes resolve | textual `IF NOT EXISTS` insertion (`CREATE [UNIQUE] INDEX`) |
+| 17 | footer | partition hierarchies (`relkind='p'` parents + `relispartition` leaves), aggregates/window (`prokind IN ('a','w')`), dependents of excluded objects (views on aggregates, FKs to excluded relations, generated columns calling table/view-stage functions), non-reproduced table/view variants (typed/inherited tables, non-default AM/tablespace/storage/replica identity), external FK refs | comment block |
+
+Function staging query: classify each function once by scanning
+`prorettype` + `proargtypes` (resolving arrays through `typelem` and
+composites through their attribute closure): no relation row types → §6;
+table row types only → §9; any view row type → §14. Bodies are never
+inspected (`check_function_bodies = off` covers them).
 
 Cross-cutting:
 
@@ -95,6 +103,9 @@ Cross-cutting:
 - **Identifier safety**: identifiers come back pre-quoted via `quote_ident()`
   in the catalog queries; string literals embedded in guards escaped by
   doubling single quotes; `format('%I.%I', ...)` for `::regclass` literals.
+- **Dollar-quote safety**: every generated `DO` block picks a tag not
+  present in its wrapped content (`$supalite$`, `$supalite1$`, ... first
+  absent one) — fixed `$$` collides with legitimate `$$` in DDL text.
 - **LF normalization**: `\r\n`/`\r` → `\n` on the final output; single
   trailing newline.
 - **Empty selection**: when every object section is empty, the schemas and
@@ -131,13 +142,22 @@ word column), UNLOGGED table, SQL function, IMMUTABLE function, plpgsql
 procedure, plpgsql trigger function + trigger, deferrable constraint
 trigger, view, view-on-view, `security_barrier` view, materialized view with
 a unique index, unpopulated matview (`WITH NO DATA`), RLS policy (asserted
-absent), plus footer exercisers: partitioned table + leaf partition, an
-aggregate, a domain, and an external-schema FK (`db_pull_ext`). Tests:
+absent), domain + domain-typed column, table-row-type column (table topo),
+array-of-composite attribute, non-default `COLLATE "C"` column, a CHECK
+containing a literal `$$` string, an identifier with an embedded double
+quote, a function body seeded with CRLF (`E'...\r\n...'`), stage-B function
+(`RETURNS SETOF customers`), stage-C function (`RETURNS SETOF paid_orders`),
+plus footer exercisers: partitioned table + leaf partition and an aggregate
+(+ a view on the aggregate, asserted omitted+footer-listed), and an
+external-schema FK (`db_pull_ext`, whose referenced table intentionally
+remains as the documented pre-existing prerequisite during round-trip).
+Tests:
 
 1. **Structure** — every expected DDL substring present; `-- <section>` banner
    positions strictly ordered; FKs after the last `CREATE TABLE`; no
-   identity-internal sequence; no `CREATE UNIQUE INDEX` (constraint-backed
-   excluded); no `\r`.
+   identity-internal sequence; no index DDL for constraint-backing indexes
+   (standalone/matview `CREATE UNIQUE INDEX IF NOT EXISTS` IS expected);
+   no `\r`.
 2. **Round-trip** (SC-001) and **idempotent re-apply** (SC-002).
 3. **Plain mode** (FR-007) — no guards / plain trigger / `IF NOT EXISTS` only
    on schema+extension lines.

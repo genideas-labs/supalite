@@ -91,24 +91,27 @@ decision trade-offs live in [tradeoffs.md](tradeoffs.md).
   explicitly proposes this default; keeps existing Supabase-tooling
   workflows working.
 
-## R9. Section order vs function-referencing expressions (strict-review CRITICAL)
+## R9. Section order vs function-referencing expressions (strict-review CRITICAL, refined round 2)
 
-- **Decision**: tables stay before functions (function signatures commonly
-  use table row types — `RETURNS SETOF <table>` is idiomatic Supabase RPC),
-  but everything whose *expressions* may call user functions moves after
-  the functions section: deferred column defaults (new §9), constraints,
-  views, triggers, indexes. Column defaults whose `pg_attrdef.adbin`
-  depends on a user function (via `pg_depend` → `pg_proc`) are stripped
-  from `CREATE TABLE` and re-emitted as
-  `ALTER TABLE ... ALTER COLUMN ... SET DEFAULT`.
+- **Decision**: functions are emitted in up to THREE stages classified by
+  their *signature* type dependencies (`prorettype` + `proargtypes`,
+  arrays resolved via `typelem`, composites via attribute closure):
+  type-stage (§6, before tables — signatures reference no relation row
+  types), table-stage (§9), view-stage (§14, `RETURNS SETOF <view>`).
+  Everything whose *expressions* may call user functions sits after the
+  relevant stage: generated columns can call type-stage functions
+  (available before `CREATE TABLE`); function-dependent column defaults
+  are stripped and re-emitted as `ALTER TABLE ... ALTER COLUMN ... SET
+  DEFAULT` after the table stage; constraints/views/triggers/indexes
+  follow their prerequisite stages.
 - **Rationale**: `SET check_function_bodies = off` defers only function
-  *body* validation — column defaults, CHECK expressions, generated
-  columns, and index predicates resolve functions at DDL time.
-- **Residual v1 limitation**: a *generated column* whose expression calls a
-  user function cannot be deferred (expression fixed at CREATE TABLE) —
-  detected and footer-listed.
-- **Alternatives**: full `pg_depend` topological interleaving (pg_dump
-  approach) — deferred to v2 with `--mode diff`.
+  *body* validation — signatures, column defaults, CHECK expressions,
+  generated columns, and index predicates resolve at DDL time.
+- **Residual v1 limitation**: a generated column calling a table/view-stage
+  function cannot replay (expression fixed at CREATE TABLE) — detected and
+  footer-flagged.
+- **Alternatives**: full `pg_depend` statement-level topological
+  interleaving (pg_dump approach) — deferred to v2 with `--mode diff`.
 
 ## R10. Partition leaves
 
@@ -120,16 +123,17 @@ decision trade-offs live in [tradeoffs.md](tradeoffs.md).
 
 ## R11. Extension scoping and ordering
 
-- **Decision**: emit all non-`plpgsql` extensions in `ORDER BY e.oid`
-  (creation order ≈ dependency order), include each extension's target
-  namespace in the schemas section, do not pin versions, and suppress the
-  schemas+extensions sections entirely when every object section is empty
-  (FR-018).
+- **Decision**: emit all non-`plpgsql` extensions in `pg_depend`
+  topological order over extension→extension edges (oid as stable
+  tie-break), include each extension's target namespace in the schemas
+  section, do not pin versions, and suppress the schemas+extensions
+  sections entirely when every object section is empty (FR-018).
 - **Rationale**: extensions are database-scoped (issue #4 explicitly wants
-  `pg_trgm`/`pg_stat_statements` regardless of schema selection); oid
-  ordering handles prerequisite chains (e.g. `cube` → `earthdistance`)
-  without a dependency walk; version pinning breaks replay on servers with
-  different packaged versions (pg_dump default behavior matches).
+  `pg_trgm`/`pg_stat_statements` regardless of schema selection); the
+  dependency walk (not the oid proxy — round-2 finding) handles
+  prerequisite chains (e.g. `cube` → `earthdistance`) deterministically;
+  version pinning breaks replay on servers with different packaged
+  versions (pg_dump default behavior matches).
 
 ## R12. Table/view variants not reproduced in v1
 
@@ -141,13 +145,38 @@ decision trade-offs live in [tradeoffs.md](tradeoffs.md).
   `NOT relispopulated`; matview AM/tablespace footer-listed.
 - **Rationale**: bounded v1 with visible, auditable gaps (spec FR-016).
 
-## R13. Package surface
+## R13. Domains are supported (round 2)
+
+- **Decision**: `CREATE DOMAIN` is rendered (base type, `DEFAULT`,
+  `NOT NULL`, CHECK constraints via `pg_get_constraintdef`) inside the
+  unified types topo-sort, removing the failure class where a
+  domain-typed column breaks `CREATE TABLE` on an empty target.
+- **Rationale**: supporting domains is strictly cheaper than
+  dependency-closure omission of their dependents.
+
+## R14. Dependents of excluded objects (round 2)
+
+- **Decision**: DDL that would necessarily fail on an empty target is
+  never emitted: views whose `pg_depend` closure includes an excluded
+  aggregate, and FKs whose `confrelid` is an excluded relation (partition
+  parent, extension-owned table) — both footer-listed. External-schema
+  FKs remain emitted (the referenced schema+table are a documented
+  pre-existing prerequisite, spec Scenario 2).
+
+## R15. Dollar-quote tag collision (round 2)
+
+- **Decision**: generated `DO` blocks pick the first of `$supalite$`,
+  `$supalite1$`, ... absent from the wrapped content instead of a fixed
+  `$$`, because dollar-quoting terminates at the tag even inside inner
+  single-quoted text.
+
+## R16. Package surface
 
 - **Decision**: re-export `generateBaselineSql` / `DbPullOptions` from
   `src/index.ts` so `import { generateBaselineSql } from 'supalite'` works
   as the contract promises (FR-020).
 
-## R14. Test double-apply semantics
+## R17. Test double-apply semantics
 
 - **Decision**: round-trip test compares regenerated output with comment
   lines stripped (header contains a generation timestamp; footer is

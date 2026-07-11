@@ -80,8 +80,12 @@ individually.
   silently dropped.
 - A view has an `INSTEAD OF` trigger → the trigger is emitted after the
   view and applies cleanly.
-- Identifiers/labels contain mixed case, reserved words, or embedded
-  quotes → output is correctly quoted/escaped and round-trips.
+- Identifiers/labels contain mixed case, reserved words, embedded single
+  OR double quotes → output is correctly quoted/escaped and round-trips.
+- Wrapped DDL contains a literal `$$` (e.g. in a CHECK expression string)
+  → `DO` guards pick a dollar-quote tag not present in the content.
+- A function body stored with CRLF line endings → output is LF-only and
+  still round-trips.
 - Missing `--db-url` and no `DB_CONNECTION` env var → usage printed,
   exit code 1.
 
@@ -100,15 +104,20 @@ individually.
   as `gen types`).
 - **FR-003**: Output MUST be a single SQL file with sections in this
   dependency order: header → schemas → extensions → sequences → types →
-  tables → sequence ownership → functions → deferred column defaults →
-  constraints (PK/UNIQUE/CHECK/EXCLUDE) → foreign keys → views → triggers →
-  indexes → footer. Rationale: functions come after tables (function
-  signatures may use table row types) but before constraints/indexes/views
-  (their expressions may call user functions); column defaults that call
-  user-defined functions are stripped from `CREATE TABLE` and emitted as
-  `ALTER TABLE ... ALTER COLUMN ... SET DEFAULT` after functions; triggers
-  come after views (`INSTEAD OF` triggers); indexes come after views
-  (materialized-view indexes).
+  functions (type-level signatures) → tables → sequence ownership →
+  functions (table-row-type signatures) → deferred column defaults →
+  constraints (PK/UNIQUE/CHECK/EXCLUDE) → foreign keys → views →
+  functions (view-row-type signatures) → triggers → indexes → footer.
+  Rationale: functions are staged by what their *signatures* reference
+  (`check_function_bodies = off` defers only bodies, never signature or
+  expression resolution) — type-only signatures precede tables so
+  generated columns and defaults can call them; `RETURNS SETOF <table>`
+  functions follow tables; `RETURNS SETOF <view>` functions follow views.
+  Column defaults that call user-defined functions are stripped from
+  `CREATE TABLE` and emitted as `ALTER TABLE ... ALTER COLUMN ... SET
+  DEFAULT` after the table-stage functions; triggers come after views
+  (`INSTEAD OF` triggers); indexes come after views (materialized-view
+  indexes).
 - **FR-004**: The header MUST include a generated-by comment (tool,
   timestamp, schema list) and `SET check_function_bodies = off;`.
 - **FR-005**: All foreign-key constraints MUST be emitted after every
@@ -130,19 +139,26 @@ individually.
 - **FR-009**: Table coverage MUST include: column types, defaults,
   NOT NULL, identity columns (`GENERATED {ALWAYS|BY DEFAULT} AS IDENTITY`,
   with non-default sequence options rendered), generated columns
-  (`GENERATED ALWAYS AS (...) STORED`), and `UNLOGGED` persistence.
-  Partition leaf tables (`relispartition`) MUST be excluded from table
-  output (they are footer-listed with their parent). Defaults that call
-  user-defined functions MUST be emitted as deferred
+  (`GENERATED ALWAYS AS (...) STORED`, including expressions calling
+  type-stage user functions), non-default column `COLLATE` clauses, and
+  `UNLOGGED` persistence. Tables MUST be topologically ordered when a
+  column uses another table's row type. Partition leaf tables
+  (`relispartition`) MUST be excluded from table output (they are
+  footer-listed with their parent). Defaults that call user-defined
+  functions MUST be emitted as deferred
   `ALTER TABLE ... ALTER COLUMN ... SET DEFAULT` statements after the
-  functions section. Non-default table variants that are NOT reproduced
+  table-stage functions section. Non-default table variants that are NOT
+  reproduced
   (typed tables, inheritance, non-default access method/tablespace/storage
   parameters/replica identity) MUST be footer-listed.
 - **FR-010**: Sequence coverage MUST include standalone sequences and
   serial-backing sequences (created before tables, ownership restored via
   `ALTER SEQUENCE ... OWNED BY` after tables); identity-internal sequences
   (`pg_depend` `deptype = 'i'`) MUST NOT be dumped.
-- **FR-011**: Type coverage MUST include enum and composite types.
+- **FR-011**: Type coverage MUST include enum, domain (base type, default,
+  NOT NULL, CHECK constraints), and composite types, emitted in a unified
+  topological order (composite-on-composite, domain-over-enum,
+  array-of-composite attributes resolved through their element type).
 - **FR-012**: Constraint coverage MUST include PK, UNIQUE, CHECK, EXCLUDE,
   and FK (table-level, from the system catalogs — CHECK constraints are not
   inlined in `CREATE TABLE`).
@@ -156,19 +172,25 @@ individually.
   does not support them); views MUST include plain views (topologically
   sorted so referenced views come first) with their options preserved
   (e.g. `security_barrier`, `check_option`) and materialized views
-  (emitted `WITH NO DATA` when unpopulated at the source). Composite types
-  MUST be topologically sorted (composite-on-composite). Extensions MUST
-  be emitted in creation (oid) order so dependent extensions follow their
-  prerequisites; extension target schemas are included in the schemas
-  section; extension versions are not pinned (v1).
+  (emitted `WITH NO DATA` when unpopulated at the source). Extensions MUST
+  be emitted in `pg_depend` topological order (oid as tie-breaker) so
+  dependent extensions follow their prerequisites; extension target
+  schemas are included in the schemas section; extension versions are not
+  pinned (v1).
 - **FR-015**: Output MUST be LF-normalized (no CR characters) and end with
   a single trailing newline.
 - **FR-016**: Unsupported objects found in the selected schemas MUST be
   listed in a footer comment and never silently dropped: partitioned
   table hierarchies (parents and their leaf partitions),
-  aggregate/window functions, domain types, non-reproduced table/view
-  variants (FR-009/FR-014), and FKs referencing schemas outside the
-  selection.
+  aggregate/window functions, non-reproduced table/view variants
+  (FR-009/FR-014), and FKs referencing schemas outside the selection
+  (the referenced objects must pre-exist on an otherwise-empty target).
+  Supported DDL that *depends on* an excluded object MUST NOT be emitted
+  as failing statements: views depending on excluded aggregates and FKs
+  referencing excluded relations (partition parents, extension-owned
+  tables) are omitted from executable output and footer-listed instead;
+  generated columns calling table/view-stage user functions are
+  footer-flagged (the expression cannot be deferred).
 - **FR-017**: `--mode` values other than `baseline` MUST exit 1 with
   `Only --mode baseline is supported in this version (diff is planned).`
 - **FR-018**: A selection that yields zero objects MUST still produce a
@@ -190,8 +212,10 @@ individually.
   composite type, table (+identity/generated columns), constraint
   (PK/UNIQUE/CHECK/EXCLUDE/FK), index, function, procedure, trigger, view,
   materialized view.
-- **Unsupported (v1, footer-listed)**: partitioned table, aggregate/window
-  function, domain type, grants, RLS policies.
+- **Supported object kinds (additional)**: domain types (with defaults and
+  CHECK constraints).
+- **Unsupported (v1, footer-listed with their dependents)**: partitioned
+  table hierarchies, aggregate/window functions, grants, RLS policies.
 
 ## Success Criteria
 
@@ -204,10 +228,12 @@ individually.
 - **SC-003** (extension filter): With `pg_trgm` installed, no `gtrgm_*`
   object appears in default output; with `--include-extension-objects`
   they appear.
-- **SC-004** (driving case coverage): Every object category measured in
-  the requester's production schema (50 identity columns of both kinds,
-  9 serial columns, 59 standalone sequences, 15 FK / 27 CHECK constraints)
-  is covered by the fixture schema and passes SC-001/SC-002.
+- **SC-004** (driving case coverage): Every object *category* measured in
+  the requester's production schema (identity columns of both kinds,
+  legacy serial columns, standalone sequences, FK and CHECK constraints,
+  extension-owned functions) is represented in the fixture schema by at
+  least one instance and passes SC-001/SC-002 — representative category
+  coverage, not the production cardinalities (50/9/59/15/27).
 - **SC-005** (CLI parity): `--db-url` / `--schema` / `--out` /
   `DB_CONNECTION` fallback behave identically to `supalite gen types`.
 
@@ -227,8 +253,10 @@ individually.
 
 - `--mode diff` (flag reserved; clear error).
 - Grants and RLS policies (future options).
-- Partitioned tables, aggregate/window functions, domain types
-  (footer-listed limitations).
+- Partitioned tables and aggregate/window functions (footer-listed,
+  including their dependents per FR-016).
+- Function-body dependency analysis beyond signature staging (bodies are
+  deferred wholesale via `check_function_bodies = off`).
 
 ## Dependencies & References
 
