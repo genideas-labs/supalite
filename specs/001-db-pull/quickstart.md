@@ -57,12 +57,14 @@ Expected: stderr `Only --mode baseline is supported in this version (diff is pla
 ## 5. Re-apply safety on a live database (the headline guarantee)
 
 ```bash
-node dist/cli.js db pull --db-url "$DB_CONNECTION" --schema public --out /tmp/baseline.sql
+node dist/cli.js db pull --db-url "$DB_CONNECTION" --schema <your_schema> --out /tmp/baseline.sql
 psql "$DB_CONNECTION" -v ON_ERROR_STOP=1 -f /tmp/baseline.sql
 ```
 
 Expected: exits 0 — re-applying a baseline to its own source database is a
-no-op (constraints included).
+no-op (constraints included). Assumption: the executing role owns the pulled
+objects (normal for a migration role) — `CREATE OR REPLACE` statements
+require ownership even when the content is identical.
 
 ## 6. Help
 

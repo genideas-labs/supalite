@@ -601,12 +601,18 @@ const renderSequenceOwnership = async (ctx: Ctx): Promise<string[]> => {
     table_schema: string;
     table_name: string;
     column_name: string;
+    seq_qualified_raw: string;
+    table_qualified_raw: string;
+    column_raw: string;
   }>(
     `SELECT quote_ident(sn.nspname) AS seq_schema,
             quote_ident(sc.relname) AS seq_name,
             quote_ident(tn.nspname) AS table_schema,
             quote_ident(tc.relname) AS table_name,
-            quote_ident(a.attname) AS column_name
+            quote_ident(a.attname) AS column_name,
+            format('%I.%I', sn.nspname, sc.relname) AS seq_qualified_raw,
+            format('%I.%I', tn.nspname, tc.relname) AS table_qualified_raw,
+            a.attname AS column_raw
      FROM pg_depend dep
      JOIN pg_class sc ON sc.oid = dep.objid AND sc.relkind = 'S'
      JOIN pg_namespace sn ON sn.oid = sc.relnamespace
@@ -625,13 +631,19 @@ const renderSequenceOwnership = async (ctx: Ctx): Promise<string[]> => {
   if (rows.length === 0) {
     return [];
   }
-  return [
-    '-- sequence ownership',
-    ...rows.map(
-      (row) =>
-        `ALTER SEQUENCE ${row.seq_schema}.${row.seq_name} OWNED BY ${row.table_schema}.${row.table_name}.${row.column_name};`
-    ),
-  ];
+  const statements = rows.map((row) => {
+    const alter = `ALTER SEQUENCE ${row.seq_schema}.${row.seq_name} OWNED BY ${row.table_schema}.${row.table_name}.${row.column_name};`;
+    if (!ctx.ifNotExists) {
+      return alter;
+    }
+    // Skip when the ownership link already exists: ALTER SEQUENCE requires
+    // being the sequence's owner even for a no-op, which would break
+    // re-applying as a different role.
+    const inner = `IF NOT EXISTS (\n    SELECT 1 FROM pg_depend dep\n    JOIN pg_attribute a ON a.attrelid = dep.refobjid AND a.attnum = dep.refobjsubid\n    WHERE dep.classid = 'pg_class'::regclass\n      AND dep.objid = '${escapeLiteral(row.seq_qualified_raw)}'::regclass\n      AND dep.refclassid = 'pg_class'::regclass\n      AND dep.refobjid = '${escapeLiteral(row.table_qualified_raw)}'::regclass\n      AND a.attname = '${escapeLiteral(row.column_raw)}'\n      AND dep.deptype = 'a'\n  ) THEN\n    ${alter}\n  END IF;`;
+    const tag = dollarTag(inner);
+    return `DO ${tag} BEGIN\n  ${inner}\nEND ${tag};`;
+  });
+  return ['-- sequence ownership', ...statements];
 };
 
 const computeExclusion = async (ctx: Ctx): Promise<Exclusion> => {
