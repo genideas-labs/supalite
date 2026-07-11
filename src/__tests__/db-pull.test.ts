@@ -103,6 +103,22 @@ describe('generateBaselineSql', () => {
     expect(baseline).toContain('ALTER TABLE db_pull_schema.customers ALTER COLUMN norm SET DEFAULT');
   });
 
+  test('constraints: guards with safe tags, EXCLUDE, hostile names, FK diversion + external FK', () => {
+    expect(baseline).toContain('ADD CONSTRAINT customers_pkey PRIMARY KEY (id)');
+    expect(baseline).toContain('orders_norm_check');
+    expect(baseline).toContain('orders_legacy_id_excl');
+    expect(baseline).toContain('"Check Me"');
+    expect(baseline).toContain("WHERE conname = 'orders_customer_id_fkey'");
+    expect(baseline).toContain("conrelid = 'db_pull_schema.orders'::regclass");
+    expect(baseline).toContain('ADD CONSTRAINT orders_ext_id_fkey');
+    expect(baseline).not.toContain('ADD CONSTRAINT events_ref_event_fkey');
+    expect(baseline).not.toContain('DO $$');
+    expect(baseline).toContain('DO $supalite$');
+    expect(baseline).toContain('$supalite1$');
+    expect(baseline.lastIndexOf('CREATE TABLE')).toBeLessThan(baseline.indexOf('FOREIGN KEY'));
+    expect(baseline.indexOf('-- constraints')).toBeLessThan(baseline.indexOf('-- foreign keys'));
+  });
+
   test('header, schema creation, and normalization', () => {
     expect(baseline).toContain('-- supalite db pull baseline');
     expect(baseline).toContain('SET check_function_bodies = off;');

@@ -20,6 +20,14 @@ type PullState = {
   deferredDomainConstraints: DeferredDomainConstraint[];
   generatedColumnFunctionDeps: Array<{ qualifiedRaw: string; column: string; functionOids: string[] }>;
   footerDiverted: string[];
+  externalRefs: string[];
+};
+
+// Objects excluded from executable output (v1 unsupported); dependents are
+// diverted to the footer instead of emitting DDL that would fail (FR-016).
+type Exclusion = {
+  relations: Map<string, string>; // oid -> qualified name
+  functions: Map<string, string>; // oid -> qualified name (aggregates/window, extension-owned)
 };
 
 type Ctx = {
@@ -28,6 +36,7 @@ type Ctx = {
   filterExtensions: boolean;
   ifNotExists: boolean;
   state: PullState;
+  exclusion: Exclusion;
 };
 
 const escapeLiteral = (value: string): string => value.replace(/'/g, "''");
@@ -625,6 +634,139 @@ const renderSequenceOwnership = async (ctx: Ctx): Promise<string[]> => {
   ];
 };
 
+const computeExclusion = async (ctx: Ctx): Promise<Exclusion> => {
+  const extensionOwned = ctx.filterExtensions
+    ? `OR EXISTS (
+         SELECT 1 FROM pg_depend ext_dep
+         WHERE ext_dep.classid = 'pg_class'::regclass
+           AND ext_dep.objid = c.oid
+           AND ext_dep.deptype = 'e'
+       )`
+    : '';
+  const { rows: relations } = await ctx.client.query<{ oid: string; qualified: string }>(
+    `SELECT c.oid::text AS oid, format('%I.%I', n.nspname, c.relname) AS qualified
+     FROM pg_class c
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = ANY($1)
+       AND (c.relkind = 'p' OR c.relispartition ${extensionOwned})`,
+    [ctx.schemas]
+  );
+  const extensionOwnedFn = ctx.filterExtensions
+    ? `OR EXISTS (
+         SELECT 1 FROM pg_depend ext_dep
+         WHERE ext_dep.classid = 'pg_proc'::regclass
+           AND ext_dep.objid = p.oid
+           AND ext_dep.deptype = 'e'
+       )`
+    : '';
+  const { rows: functions } = await ctx.client.query<{ oid: string; qualified: string }>(
+    `SELECT p.oid::text AS oid, format('%I.%I', n.nspname, p.proname) AS qualified
+     FROM pg_proc p
+     JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = ANY($1)
+       AND (p.prokind IN ('a', 'w') ${extensionOwnedFn})`,
+    [ctx.schemas]
+  );
+  return {
+    relations: new Map(relations.map((row) => [row.oid, row.qualified])),
+    functions: new Map(functions.map((row) => [row.oid, row.qualified])),
+  };
+};
+
+const renderConstraints = async (ctx: Ctx): Promise<{ constraints: string[]; foreignKeys: string[] }> => {
+  const { rows } = await ctx.client.query<{
+    schema: string;
+    table_name: string;
+    name: string;
+    raw_name: string;
+    qualified_raw: string;
+    type: string;
+    definition: string;
+    ref_oid: string | null;
+    ref_schema_raw: string | null;
+    ref_qualified: string | null;
+  }>(
+    `SELECT quote_ident(n.nspname) AS schema,
+            quote_ident(cl.relname) AS table_name,
+            quote_ident(con.conname) AS name,
+            con.conname AS raw_name,
+            format('%I.%I', n.nspname, cl.relname) AS qualified_raw,
+            con.contype AS type,
+            pg_get_constraintdef(con.oid) AS definition,
+            NULLIF(con.confrelid, 0)::text AS ref_oid,
+            fn.nspname AS ref_schema_raw,
+            CASE WHEN con.confrelid <> 0 THEN format('%I.%I', fn.nspname, fcl.relname) END AS ref_qualified
+     FROM pg_constraint con
+     JOIN pg_class cl ON cl.oid = con.conrelid
+     JOIN pg_namespace n ON n.oid = cl.relnamespace
+     LEFT JOIN pg_class fcl ON fcl.oid = con.confrelid
+     LEFT JOIN pg_namespace fn ON fn.oid = fcl.relnamespace
+     WHERE n.nspname = ANY($1)
+       AND con.contype IN ('p', 'u', 'c', 'f', 'x')
+       AND con.conparentid = 0
+       AND cl.relkind = 'r'
+       AND NOT cl.relispartition
+       ${extensionFilter(ctx, 'pg_class', 'cl.oid')}
+     ORDER BY n.nspname, cl.relname, con.conname`,
+    [ctx.schemas]
+  );
+
+  const guard = (alter: string, innerCheck: string): string => {
+    const inner = `IF NOT EXISTS (\n    ${innerCheck}\n  ) THEN\n    ${alter}\n  END IF;`;
+    const tag = dollarTag(inner);
+    return `DO ${tag} BEGIN\n  ${inner}\nEND ${tag};`;
+  };
+
+  const renderOne = (row: (typeof rows)[number]): string => {
+    const alter = `ALTER TABLE ${row.schema}.${row.table_name} ADD CONSTRAINT ${row.name} ${row.definition};`;
+    if (!ctx.ifNotExists) {
+      return alter;
+    }
+    return guard(
+      alter,
+      `SELECT 1 FROM pg_constraint\n    WHERE conname = '${escapeLiteral(row.raw_name)}'\n      AND conrelid = '${escapeLiteral(row.qualified_raw)}'::regclass`
+    );
+  };
+
+  const constraints: string[] = [];
+  const foreignKeys: string[] = [];
+  rows.forEach((row) => {
+    if (row.type !== 'f') {
+      constraints.push(renderOne(row));
+      return;
+    }
+    if (row.ref_oid && ctx.exclusion.relations.has(row.ref_oid)) {
+      ctx.state.footerDiverted.push(
+        `foreign key to excluded relation (not emitted): ${row.qualified_raw}.${row.raw_name} -> ${ctx.exclusion.relations.get(row.ref_oid)}`
+      );
+      return;
+    }
+    if (row.ref_schema_raw && !ctx.schemas.includes(row.ref_schema_raw) && row.ref_qualified) {
+      ctx.state.externalRefs.push(`${row.qualified_raw}.${row.raw_name} -> ${row.ref_qualified}`);
+    }
+    foreignKeys.push(renderOne(row));
+  });
+
+  ctx.state.deferredDomainConstraints.forEach((domainCon) => {
+    const alter = `ALTER DOMAIN ${domainCon.qualifiedRaw} ADD CONSTRAINT ${domainCon.nameQuoted} ${domainCon.definition};`;
+    if (!ctx.ifNotExists) {
+      constraints.push(alter);
+      return;
+    }
+    constraints.push(
+      guard(
+        alter,
+        `SELECT 1 FROM pg_constraint\n    WHERE conname = '${escapeLiteral(domainCon.nameRaw)}'\n      AND contypid = '${escapeLiteral(domainCon.qualifiedRaw)}'::regtype`
+      )
+    );
+  });
+
+  return {
+    constraints: constraints.length > 0 ? ['-- constraints', ...constraints] : [],
+    foreignKeys: foreignKeys.length > 0 ? ['-- foreign keys', ...foreignKeys] : [],
+  };
+};
+
 type FunctionStage = 'type' | 'table' | 'view';
 
 type ClassifiedFunction = { oid: string; definition: string; stage: FunctionStage };
@@ -749,8 +891,11 @@ export const generateBaselineSql = async (options: DbPullOptions): Promise<strin
         deferredDomainConstraints: [],
         generatedColumnFunctionDeps: [],
         footerDiverted: [],
+        externalRefs: [],
       },
+      exclusion: { relations: new Map(), functions: new Map() },
     };
+    ctx.exclusion = await computeExclusion(ctx);
     const header = [
       '-- supalite db pull baseline',
       `-- generated at: ${new Date().toISOString()}`,
@@ -774,6 +919,9 @@ export const generateBaselineSql = async (options: DbPullOptions): Promise<strin
     sections.push(await renderSequenceOwnership(ctx));
     sections.push(renderFunctionStage(functions, 'table'));
     sections.push(renderDeferredDefaults(ctx));
+    const constraintSections = await renderConstraints(ctx);
+    sections.push(constraintSections.constraints);
+    sections.push(constraintSections.foreignKeys);
     ctx.state.generatedColumnFunctionDeps.forEach((dep) => {
       const worstStage = dep.functionOids
         .map((oid) => functionStageByOid.get(oid) ?? 'type')
