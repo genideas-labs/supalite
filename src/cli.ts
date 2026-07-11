@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { dumpFunctionsSql, generateTypes } from './gen-types';
+import { generateBaselineSql } from './db-pull';
 
 const printUsage = (): void => {
   console.log(`supalite gen types \\
@@ -202,14 +203,128 @@ const parseArgs = (args: string[]) => {
   return result;
 };
 
-const run = async () => {
-  const args = process.argv.slice(2);
-  if (args.length < 2 || args[0] !== 'gen' || args[1] !== 'types') {
-    printUsage();
+const printDbPullUsage = (): void => {
+  console.log(`supalite db pull \\
+  --db-url <postgres_url> \\
+  [--schema public] \\
+  [--out supabase/migrations/<YYYYMMDDHHMMSS>_baseline.sql] \\
+  [--mode baseline] \\
+  [--include-extension-objects] \\
+  [--no-if-not-exists]
+
+Defaults:
+- schema: public (comma-separated or repeated --schema)
+- out: supabase/migrations/<UTC timestamp>_baseline.sql (use --out - to print to stdout)
+- mode: baseline (diff is planned)
+- extension-owned objects are EXCLUDED (pg_depend deptype 'e'); pass --include-extension-objects to include them
+- idempotent DDL is ON (IF NOT EXISTS / CREATE OR REPLACE / constraint guards); pass --no-if-not-exists for plain DDL
+- replaying triggers requires PostgreSQL 14+ (CREATE OR REPLACE TRIGGER)
+`);
+};
+
+const parseDbPullArgs = (args: string[]) => {
+  const result: {
+    dbUrl?: string;
+    schemas: string[];
+    out?: string;
+    mode: string;
+    includeExtensionObjects: boolean;
+    noIfNotExists: boolean;
+    help: boolean;
+  } = {
+    schemas: [],
+    mode: 'baseline',
+    includeExtensionObjects: false,
+    noIfNotExists: false,
+    help: false,
+  };
+
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === '--help' || arg === '-h') {
+      result.help = true;
+      return result;
+    }
+    if (arg === '--db-url') {
+      result.dbUrl = args[i + 1];
+      i += 1;
+      continue;
+    }
+    if (arg === '--schema' || arg === '--schemas') {
+      const value = args[i + 1] ?? '';
+      i += 1;
+      value
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+        .forEach((schema) => result.schemas.push(schema));
+      continue;
+    }
+    if (arg === '--out') {
+      result.out = args[i + 1];
+      i += 1;
+      continue;
+    }
+    if (arg === '--mode') {
+      result.mode = args[i + 1] ?? '';
+      i += 1;
+      continue;
+    }
+    if (arg === '--include-extension-objects') {
+      result.includeExtensionObjects = true;
+      continue;
+    }
+    if (arg === '--no-if-not-exists') {
+      result.noIfNotExists = true;
+      continue;
+    }
+  }
+
+  return result;
+};
+
+const utcTimestamp = (): string => new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+
+const runDbPull = async (rawArgs: string[]): Promise<void> => {
+  const parsed = parseDbPullArgs(rawArgs);
+  if (parsed.help) {
+    printDbPullUsage();
+    process.exit(0);
+  }
+
+  const dbUrl = parsed.dbUrl || process.env.DB_CONNECTION;
+  if (!dbUrl) {
+    console.error('Missing --db-url (or DB_CONNECTION env var).');
+    printDbPullUsage();
+    process.exit(1);
+  }
+  if (parsed.mode !== 'baseline') {
+    console.error('Only --mode baseline is supported in this version (diff is planned).');
     process.exit(1);
   }
 
-  const parsed = parseArgs(args.slice(2));
+  const schemas = parsed.schemas.length > 0 ? parsed.schemas : ['public'];
+  const sql = await generateBaselineSql({
+    dbUrl,
+    schemas,
+    includeExtensionObjects: parsed.includeExtensionObjects,
+    ifNotExists: !parsed.noIfNotExists,
+  });
+
+  if (parsed.out === '-' || parsed.out === 'stdout') {
+    process.stdout.write(sql);
+    return;
+  }
+  const outPath = path.resolve(
+    parsed.out ?? path.join('supabase', 'migrations', `${utcTimestamp()}_baseline.sql`)
+  );
+  await fs.mkdir(path.dirname(outPath), { recursive: true });
+  await fs.writeFile(outPath, sql, 'utf8');
+  console.log(`Wrote baseline schema to ${outPath}`);
+};
+
+const runGenTypes = async (rawArgs: string[]): Promise<void> => {
+  const parsed = parseArgs(rawArgs);
   if (parsed.help) {
     printUsage();
     process.exit(0);
@@ -257,6 +372,21 @@ const run = async () => {
     await fs.writeFile(outPath, functionsSql, 'utf8');
     console.log(`Wrote function definitions to ${outPath}`);
   }
+};
+
+const run = async (): Promise<void> => {
+  const args = process.argv.slice(2);
+  if (args[0] === 'gen' && args[1] === 'types') {
+    await runGenTypes(args.slice(2));
+    return;
+  }
+  if (args[0] === 'db' && args[1] === 'pull') {
+    await runDbPull(args.slice(2));
+    return;
+  }
+  printUsage();
+  printDbPullUsage();
+  process.exit(1);
 };
 
 run().catch((error) => {
