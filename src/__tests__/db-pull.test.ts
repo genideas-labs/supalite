@@ -38,6 +38,16 @@ describe('generateBaselineSql', () => {
     expect(rootExport).toBe(generateBaselineSql);
   });
 
+  test('sequences: standalone with options, serial-backing, no identity-internal', () => {
+    expect(baseline).toContain('CREATE SEQUENCE IF NOT EXISTS db_pull_schema.invoice_seq');
+    expect(baseline).toContain('START WITH 1000');
+    expect(baseline).toContain('INCREMENT BY 5');
+    expect(baseline).toContain('CACHE 10');
+    expect(baseline).toContain('db_pull_schema.legacy_id_seq');
+    expect(baseline).not.toContain('customers_id_seq');
+    expect(baseline).not.toContain('orders_id_seq');
+  });
+
   test('header, schema creation, and normalization', () => {
     expect(baseline).toContain('-- supalite db pull baseline');
     expect(baseline).toContain('SET check_function_bodies = off;');

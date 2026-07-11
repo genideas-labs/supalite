@@ -132,6 +132,55 @@ const renderExtensions = async (ctx: Ctx): Promise<string[]> => {
   ];
 };
 
+const renderSequences = async (ctx: Ctx): Promise<string[]> => {
+  const { rows } = await ctx.client.query<{
+    schema: string;
+    name: string;
+    data_type: string;
+    start: string;
+    increment: string;
+    min: string;
+    max: string;
+    cache: string;
+    cycle: boolean;
+  }>(
+    `SELECT quote_ident(n.nspname) AS schema,
+            quote_ident(c.relname) AS name,
+            format_type(s.seqtypid, NULL) AS data_type,
+            s.seqstart::text AS start,
+            s.seqincrement::text AS increment,
+            s.seqmin::text AS min,
+            s.seqmax::text AS max,
+            s.seqcache::text AS cache,
+            s.seqcycle AS cycle
+     FROM pg_sequence s
+     JOIN pg_class c ON c.oid = s.seqrelid
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = ANY($1)
+       AND NOT EXISTS (
+         SELECT 1 FROM pg_depend idep
+         WHERE idep.classid = 'pg_class'::regclass
+           AND idep.objid = c.oid
+           AND idep.deptype = 'i'
+       )
+       ${extensionFilter(ctx, 'pg_class', 'c.oid')}
+     ORDER BY n.nspname, c.relname`,
+    [ctx.schemas]
+  );
+  if (rows.length === 0) {
+    return [];
+  }
+  const create = ctx.ifNotExists ? 'CREATE SEQUENCE IF NOT EXISTS' : 'CREATE SEQUENCE';
+  return [
+    '-- sequences',
+    ...rows.map(
+      (row) =>
+        `${create} ${row.schema}.${row.name} AS ${row.data_type} START WITH ${row.start} ` +
+        `INCREMENT BY ${row.increment} MINVALUE ${row.min} MAXVALUE ${row.max} CACHE ${row.cache}${row.cycle ? ' CYCLE' : ''};`
+    ),
+  ];
+};
+
 export const generateBaselineSql = async (options: DbPullOptions): Promise<string> => {
   const schemas = options.schemas && options.schemas.length > 0 ? options.schemas : ['public'];
   const client = new Client({ connectionString: options.dbUrl });
@@ -157,6 +206,7 @@ export const generateBaselineSql = async (options: DbPullOptions): Promise<strin
     const sections: string[][] = [];
     sections.push(await renderSchemas(ctx));
     sections.push(await renderExtensions(ctx));
+    sections.push(await renderSequences(ctx));
     const body = sections
       .filter((section) => section.length > 0)
       .map((section) => section.join('\n'))
