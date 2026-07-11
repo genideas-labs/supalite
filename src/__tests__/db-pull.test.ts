@@ -234,6 +234,36 @@ describe('generateBaselineSql', () => {
     expect(baseline).not.toContain('ROW LEVEL SECURITY');
   });
 
+  test('extension filter: pg_trgm objects excluded by default across all sections, included on opt-in', async () => {
+    const pre = await pool.query("SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'");
+    const preExisted = (pre.rowCount ?? 0) > 0;
+    let available = true;
+    try {
+      await pool.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+    } catch {
+      available = false;
+    }
+    if (!available) {
+      console.warn('pg_trgm unavailable in this Postgres — skipping extension-filter test');
+      return;
+    }
+    try {
+      const filtered = await generateBaselineSql({ dbUrl: connectionString, schemas: ['public'] });
+      expect(filtered).toContain('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+      expect(filtered).not.toContain('gtrgm');
+      const unfiltered = await generateBaselineSql({
+        dbUrl: connectionString,
+        schemas: ['public'],
+        includeExtensionObjects: true,
+      });
+      expect(unfiltered).toContain('gtrgm');
+    } finally {
+      if (!preExisted) {
+        await pool.query('DROP EXTENSION IF EXISTS pg_trgm');
+      }
+    }
+  });
+
   // The only test that mutates the database: drops and rebuilds the schema
   // from the generated baseline (all other tests assert on the prebuilt
   // string). db_pull_ext intentionally stays in place — the documented
