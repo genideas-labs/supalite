@@ -87,6 +87,22 @@ describe('generateBaselineSql', () => {
     expect(baseline).toContain('ALTER SEQUENCE db_pull_schema.legacy_id_seq OWNED BY db_pull_schema.orders.legacy_id;');
   });
 
+  test('functions: staged emission + deferred column defaults', () => {
+    const typeStage = baseline.indexOf('-- functions\n');
+    expect(typeStage).toBeGreaterThan(-1);
+    expect(typeStage).toBeLessThan(baseline.indexOf('-- tables'));
+    expect(baseline).toContain('CREATE OR REPLACE FUNCTION db_pull_schema.norm_email');
+    expect(baseline).toContain('CREATE OR REPLACE FUNCTION db_pull_schema.crlf_fn');
+    expect(baseline).toContain('CREATE OR REPLACE FUNCTION db_pull_schema.order_count');
+    expect(baseline).toContain('CREATE OR REPLACE PROCEDURE db_pull_schema.log_noop');
+    const tableStage = baseline.indexOf('-- table-dependent functions');
+    expect(tableStage).toBeGreaterThan(baseline.indexOf('-- sequence ownership'));
+    expect(baseline.slice(tableStage)).toContain('user_rows');
+    const deferred = baseline.indexOf('-- deferred column defaults');
+    expect(deferred).toBeGreaterThan(tableStage);
+    expect(baseline).toContain('ALTER TABLE db_pull_schema.customers ALTER COLUMN norm SET DEFAULT');
+  });
+
   test('header, schema creation, and normalization', () => {
     expect(baseline).toContain('-- supalite db pull baseline');
     expect(baseline).toContain('SET check_function_bodies = off;');

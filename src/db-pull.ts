@@ -625,6 +625,114 @@ const renderSequenceOwnership = async (ctx: Ctx): Promise<string[]> => {
   ];
 };
 
+type FunctionStage = 'type' | 'table' | 'view';
+
+type ClassifiedFunction = { oid: string; definition: string; stage: FunctionStage };
+
+// Stage functions by what their SIGNATURES reference (bodies are deferred by
+// check_function_bodies = off): no relation row types -> 'type' (before
+// tables), table row types -> 'table', any view row type -> 'view'. Arrays
+// resolve through typelem; composite attributes are expanded transitively.
+const classifyFunctions = async (ctx: Ctx): Promise<ClassifiedFunction[]> => {
+  const { rows: fns } = await ctx.client.query<{
+    oid: string;
+    definition: string;
+    rettype: string;
+    argtypes: string[];
+  }>(
+    `SELECT p.oid::text AS oid,
+            pg_get_functiondef(p.oid) AS definition,
+            p.prorettype::text AS rettype,
+            ARRAY(SELECT unnest(COALESCE(p.proallargtypes, p.proargtypes::oid[]))::text) AS argtypes
+     FROM pg_proc p
+     JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = ANY($1)
+       AND p.prokind IN ('f', 'p')
+       ${extensionFilter(ctx, 'pg_proc', 'p.oid')}
+     ORDER BY n.nspname, p.proname, p.oid`,
+    [ctx.schemas]
+  );
+  const info = new Map<string, { elem: string; relkind: string; attrs: string[] }>();
+  let frontier: string[] = [];
+  fns.forEach((fn) => frontier.push(fn.rettype, ...fn.argtypes));
+  frontier = Array.from(new Set(frontier.filter((oid) => oid !== '0')));
+  while (frontier.length > 0) {
+    const { rows } = await ctx.client.query<{ oid: string; elem: string; relkind: string; attrs: string[] }>(
+      `SELECT t.oid::text AS oid,
+              t.typelem::text AS elem,
+              COALESCE(c.relkind::text, '') AS relkind,
+              CASE WHEN c.relkind = 'c' THEN ARRAY(
+                SELECT a.atttypid::text FROM pg_attribute a
+                WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped)
+              ELSE ARRAY[]::text[] END AS attrs
+       FROM pg_type t
+       LEFT JOIN pg_class c ON c.oid = t.typrelid
+       WHERE t.oid = ANY($1::oid[])`,
+      [frontier]
+    );
+    const next = new Set<string>();
+    rows.forEach((row) => {
+      info.set(row.oid, row);
+      [row.elem, ...row.attrs].forEach((oid) => {
+        if (oid !== '0' && !info.has(oid)) {
+          next.add(oid);
+        }
+      });
+    });
+    frontier = Array.from(next);
+  }
+  const stageOf = (fn: { rettype: string; argtypes: string[] }): FunctionStage => {
+    const seen = new Set<string>();
+    const stack = [fn.rettype, ...fn.argtypes];
+    let hasTable = false;
+    while (stack.length > 0) {
+      const oid = stack.pop() as string;
+      if (oid === '0' || seen.has(oid)) {
+        continue;
+      }
+      seen.add(oid);
+      const typeInfo = info.get(oid);
+      if (!typeInfo) {
+        continue;
+      }
+      if (typeInfo.relkind === 'v' || typeInfo.relkind === 'm') {
+        return 'view';
+      }
+      if (['r', 'p', 'f'].includes(typeInfo.relkind)) {
+        hasTable = true;
+      }
+      if (typeInfo.elem !== '0') {
+        stack.push(typeInfo.elem);
+      }
+      typeInfo.attrs.forEach((attr) => stack.push(attr));
+    }
+    return hasTable ? 'table' : 'type';
+  };
+  return fns.map((fn) => ({ oid: fn.oid, definition: fn.definition, stage: stageOf(fn) }));
+};
+
+const FUNCTION_STAGE_BANNERS: Record<FunctionStage, string> = {
+  type: '-- functions',
+  table: '-- table-dependent functions',
+  view: '-- view-dependent functions',
+};
+
+const renderFunctionStage = (functions: ClassifiedFunction[], stage: FunctionStage): string[] => {
+  const defs = functions.filter((fn) => fn.stage === stage);
+  if (defs.length === 0) {
+    return [];
+  }
+  return [FUNCTION_STAGE_BANNERS[stage], ...defs.map((fn) => `${normalizeLf(fn.definition.trim())};`)];
+};
+
+const renderDeferredDefaults = (ctx: Ctx): string[] => {
+  const statements = [...ctx.state.deferredColumnDefaults, ...ctx.state.deferredDomainDefaults];
+  if (statements.length === 0) {
+    return [];
+  }
+  return ['-- deferred column defaults', ...statements];
+};
+
 export const generateBaselineSql = async (options: DbPullOptions): Promise<string> => {
   const schemas = options.schemas && options.schemas.length > 0 ? options.schemas : ['public'];
   const client = new Client({ connectionString: options.dbUrl });
@@ -654,13 +762,28 @@ export const generateBaselineSql = async (options: DbPullOptions): Promise<strin
       console.warn(`Warning: no objects found in schema(s) ${schemas.join(', ')}.`);
       return normalizeLf(`${header.join('\n')}\n`);
     }
+    const functions = await classifyFunctions(ctx);
+    const functionStageByOid = new Map(functions.map((fn) => [fn.oid, fn.stage]));
     const sections: string[][] = [];
     sections.push(await renderSchemas(ctx));
     sections.push(await renderExtensions(ctx));
     sections.push(await renderSequences(ctx));
     sections.push(await renderTypes(ctx));
+    sections.push(renderFunctionStage(functions, 'type'));
     sections.push(await renderTables(ctx));
     sections.push(await renderSequenceOwnership(ctx));
+    sections.push(renderFunctionStage(functions, 'table'));
+    sections.push(renderDeferredDefaults(ctx));
+    ctx.state.generatedColumnFunctionDeps.forEach((dep) => {
+      const worstStage = dep.functionOids
+        .map((oid) => functionStageByOid.get(oid) ?? 'type')
+        .find((stage) => stage !== 'type');
+      if (worstStage) {
+        ctx.state.footerDiverted.push(
+          `generated column calling a ${worstStage}-stage function (cannot replay on an empty target): ${dep.qualifiedRaw}.${dep.column}`
+        );
+      }
+    });
     const body = sections
       .filter((section) => section.length > 0)
       .map((section) => section.join('\n'))
