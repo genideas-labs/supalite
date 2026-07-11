@@ -196,6 +196,44 @@ describe('generateBaselineSql', () => {
     }
   });
 
+  test('plain mode, empty selection, and RLS/grants exclusion', async () => {
+    const plain = await generateBaselineSql({
+      dbUrl: connectionString,
+      schemas: [schemaName],
+      ifNotExists: false,
+    });
+    expect(plain).not.toMatch(/^DO \$/m);
+    expect(plain).toContain('CREATE TYPE db_pull_schema.order_status');
+    expect(plain).toContain('CREATE DOMAIN db_pull_schema.positive_int');
+    expect(plain).toMatch(/^CREATE TRIGGER orders_touch_status/m);
+    expect(plain).toContain('CREATE CONSTRAINT TRIGGER orders_ct');
+    expect(plain).toContain('CREATE OR REPLACE FUNCTION');
+    const offending = plain
+      .split('\n')
+      .filter(
+        (line) =>
+          line.includes('IF NOT EXISTS') &&
+          !line.startsWith('CREATE SCHEMA IF NOT EXISTS') &&
+          !line.startsWith('CREATE EXTENSION IF NOT EXISTS')
+      );
+    expect(offending).toEqual([]);
+
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const empty = await generateBaselineSql({
+      dbUrl: connectionString,
+      schemas: ['db_pull_nonexistent'],
+    });
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+    expect(empty).toContain('-- supalite db pull baseline');
+    expect(empty).not.toContain('-- schemas\n');
+    expect(empty).not.toContain('CREATE');
+
+    expect(baseline).not.toContain('GRANT ');
+    expect(baseline).not.toContain('CREATE POLICY');
+    expect(baseline).not.toContain('ROW LEVEL SECURITY');
+  });
+
   // The only test that mutates the database: drops and rebuilds the schema
   // from the generated baseline (all other tests assert on the prebuilt
   // string). db_pull_ext intentionally stays in place — the documented
