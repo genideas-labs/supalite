@@ -144,6 +144,20 @@ describe('generateBaselineSql', () => {
     expect(baseline.indexOf('-- triggers')).toBeGreaterThan(baseline.indexOf('-- views'));
   });
 
+  test('indexes: IF NOT EXISTS insertion, unique standalone, matview + expression, no constraint-backing', () => {
+    const section = baseline.slice(baseline.indexOf('-- indexes'));
+    expect(baseline.indexOf('-- indexes')).toBeGreaterThan(baseline.indexOf('-- views'));
+    expect(section).toContain(
+      'CREATE INDEX IF NOT EXISTS orders_status_idx ON db_pull_schema.orders USING btree (status)'
+    );
+    expect(section).toContain('CREATE UNIQUE INDEX IF NOT EXISTS customers_full_name_uidx');
+    expect(section).toContain('order_totals_mv_uidx');
+    expect(section).toContain('customers_email_norm_idx');
+    expect(baseline).not.toMatch(/CREATE (UNIQUE )?INDEX [^\n]*customers_email_key/);
+    expect(baseline).not.toMatch(/CREATE (UNIQUE )?INDEX [^\n]*customers_pkey/);
+    expect(baseline).not.toMatch(/CREATE (UNIQUE )?INDEX [^\n]*orders_legacy_id_excl/);
+  });
+
   test('header, schema creation, and normalization', () => {
     expect(baseline).toContain('-- supalite db pull baseline');
     expect(baseline).toContain('SET check_function_bodies = off;');

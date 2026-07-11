@@ -1022,6 +1022,37 @@ const renderTriggers = async (ctx: Ctx): Promise<string[]> => {
   return ['-- triggers', ...statements];
 };
 
+const renderIndexes = async (ctx: Ctx): Promise<string[]> => {
+  const { rows } = await ctx.client.query<{ definition: string }>(
+    `SELECT pg_get_indexdef(i.indexrelid) AS definition
+     FROM pg_index i
+     JOIN pg_class ic ON ic.oid = i.indexrelid
+     JOIN pg_class tc ON tc.oid = i.indrelid
+     JOIN pg_namespace n ON n.oid = tc.relnamespace
+     WHERE n.nspname = ANY($1)
+       AND tc.relkind IN ('r', 'm')
+       AND NOT tc.relispartition
+       AND NOT EXISTS (SELECT 1 FROM pg_constraint bc WHERE bc.conindid = i.indexrelid)
+       ${extensionFilter(ctx, 'pg_class', 'ic.oid')}
+       ${extensionFilter(ctx, 'pg_class', 'tc.oid')}
+     ORDER BY pg_get_indexdef(i.indexrelid)`,
+    [ctx.schemas]
+  );
+  if (rows.length === 0) {
+    return [];
+  }
+  const statements = rows.map((row) => {
+    let definition = normalizeLf(row.definition.trim());
+    if (ctx.ifNotExists) {
+      definition = definition
+        .replace(/^CREATE UNIQUE INDEX /, 'CREATE UNIQUE INDEX IF NOT EXISTS ')
+        .replace(/^CREATE INDEX /, 'CREATE INDEX IF NOT EXISTS ');
+    }
+    return `${definition};`;
+  });
+  return ['-- indexes', ...statements];
+};
+
 export const generateBaselineSql = async (options: DbPullOptions): Promise<string> => {
   const schemas = options.schemas && options.schemas.length > 0 ? options.schemas : ['public'];
   const client = new Client({ connectionString: options.dbUrl });
@@ -1072,6 +1103,7 @@ export const generateBaselineSql = async (options: DbPullOptions): Promise<strin
     sections.push(await renderViews(ctx));
     sections.push(renderFunctionStage(functions, 'view'));
     sections.push(await renderTriggers(ctx));
+    sections.push(await renderIndexes(ctx));
     ctx.state.generatedColumnFunctionDeps.forEach((dep) => {
       const worstStage = dep.functionOids
         .map((oid) => functionStageByOid.get(oid) ?? 'type')
