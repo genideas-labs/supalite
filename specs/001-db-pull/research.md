@@ -54,9 +54,13 @@ decision trade-offs live in [tradeoffs.md](tradeoffs.md).
 
 - **Decision**: indexes — insert `IF NOT EXISTS` textually after
   `CREATE [UNIQUE] INDEX ` (two anchored string replaces on
-  `pg_get_indexdef` output); triggers — rewrite `CREATE TRIGGER ` →
-  `CREATE OR REPLACE TRIGGER ` (PG14+ replay target, documented in README).
-  Constraint-backing indexes excluded via `pg_constraint.conindid`.
+  `pg_get_indexdef` output); plain triggers — rewrite `CREATE TRIGGER ` →
+  `CREATE OR REPLACE TRIGGER ` (PG14+ replay target, documented in README);
+  constraint triggers (`tgconstraint <> 0`) — `OR REPLACE` is not supported
+  for them on any PG version, so wrap the original
+  `CREATE CONSTRAINT TRIGGER` in a `DO $$` existence guard keyed on
+  `tgname` + `tgrelid`. Constraint-backing indexes (PK/UNIQUE/EXCLUDE)
+  excluded via `pg_constraint.conindid`.
 - **Rationale**: deparse output is stable and anchored; PG14 floor accepted
   by requester (Cloud SQL targets are 14+).
 
@@ -87,7 +91,63 @@ decision trade-offs live in [tradeoffs.md](tradeoffs.md).
   explicitly proposes this default; keeps existing Supabase-tooling
   workflows working.
 
-## R9. Test double-apply semantics
+## R9. Section order vs function-referencing expressions (strict-review CRITICAL)
+
+- **Decision**: tables stay before functions (function signatures commonly
+  use table row types — `RETURNS SETOF <table>` is idiomatic Supabase RPC),
+  but everything whose *expressions* may call user functions moves after
+  the functions section: deferred column defaults (new §9), constraints,
+  views, triggers, indexes. Column defaults whose `pg_attrdef.adbin`
+  depends on a user function (via `pg_depend` → `pg_proc`) are stripped
+  from `CREATE TABLE` and re-emitted as
+  `ALTER TABLE ... ALTER COLUMN ... SET DEFAULT`.
+- **Rationale**: `SET check_function_bodies = off` defers only function
+  *body* validation — column defaults, CHECK expressions, generated
+  columns, and index predicates resolve functions at DDL time.
+- **Residual v1 limitation**: a *generated column* whose expression calls a
+  user function cannot be deferred (expression fixed at CREATE TABLE) —
+  detected and footer-listed.
+- **Alternatives**: full `pg_depend` topological interleaving (pg_dump
+  approach) — deferred to v2 with `--mode diff`.
+
+## R10. Partition leaves
+
+- **Decision**: exclude `relispartition = true` relations from tables,
+  constraints, triggers, and indexes; footer-list the full hierarchy
+  (parent `relkind='p'` + leaves).
+- **Rationale**: leaves are `relkind='r'` and would otherwise be dumped as
+  ordinary tables, silently losing partition bounds.
+
+## R11. Extension scoping and ordering
+
+- **Decision**: emit all non-`plpgsql` extensions in `ORDER BY e.oid`
+  (creation order ≈ dependency order), include each extension's target
+  namespace in the schemas section, do not pin versions, and suppress the
+  schemas+extensions sections entirely when every object section is empty
+  (FR-018).
+- **Rationale**: extensions are database-scoped (issue #4 explicitly wants
+  `pg_trgm`/`pg_stat_statements` regardless of schema selection); oid
+  ordering handles prerequisite chains (e.g. `cube` → `earthdistance`)
+  without a dependency walk; version pinning breaks replay on servers with
+  different packaged versions (pg_dump default behavior matches).
+
+## R12. Table/view variants not reproduced in v1
+
+- **Decision**: reproduce `UNLOGGED` inline; footer-list (never silently
+  drop): typed tables (`reloftype`), inheritance children (`pg_inherits`
+  non-partition), non-default access method / tablespace / storage
+  parameters / replica identity. Views: render `reloptions`
+  (`security_barrier`, `check_option`); matviews: `WITH NO DATA` when
+  `NOT relispopulated`; matview AM/tablespace footer-listed.
+- **Rationale**: bounded v1 with visible, auditable gaps (spec FR-016).
+
+## R13. Package surface
+
+- **Decision**: re-export `generateBaselineSql` / `DbPullOptions` from
+  `src/index.ts` so `import { generateBaselineSql } from 'supalite'` works
+  as the contract promises (FR-020).
+
+## R14. Test double-apply semantics
 
 - **Decision**: round-trip test compares regenerated output with comment
   lines stripped (header contains a generation timestamp; footer is

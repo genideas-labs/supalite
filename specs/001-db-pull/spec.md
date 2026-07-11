@@ -29,11 +29,13 @@ individually.
    **Then** a file `supabase/migrations/<UTC YYYYMMDDHHMMSS>_baseline.sql`
    is created (directory auto-created) containing DDL for all supported
    object kinds in dependency order.
-2. **Given** the generated baseline file and an empty database,
+2. **Given** the generated baseline file and an empty database (where any
+   externally-referenced schemas listed in the footer already exist),
    **When** the file is applied,
    **Then** every dumped object is created without error (schemas,
-   extensions, sequences, types, tables, constraints, indexes, functions,
-   triggers, views).
+   extensions, sequences, types, tables, functions, constraints, indexes,
+   triggers, views) — including column defaults, CHECK constraints, and
+   index expressions that call user-defined functions.
 3. **Given** the generated baseline file and the original source database,
    **When** the file is re-applied,
    **Then** it completes without any error — including constraints
@@ -71,9 +73,15 @@ individually.
   applies cleanly because all FKs are emitted after all tables.
 - Source function bodies contain CRLF line endings → output file is
   LF-only.
-- Unsupported objects exist in the schema (partitioned tables,
-  aggregate/window functions, domain types) → they are skipped and listed
-  in a footer comment, never silently dropped.
+- Unsupported objects exist in the schema (partitioned tables and their
+  leaf partitions, aggregate/window functions, domain types, typed/
+  inherited/UNLOGGED-variant specifics beyond FR-009) → reproduced where
+  specified, otherwise skipped and listed in a footer comment, never
+  silently dropped.
+- A view has an `INSTEAD OF` trigger → the trigger is emitted after the
+  view and applies cleanly.
+- Identifiers/labels contain mixed case, reserved words, or embedded
+  quotes → output is correctly quoted/escaped and round-trips.
 - Missing `--db-url` and no `DB_CONNECTION` env var → usage printed,
   exit code 1.
 
@@ -92,8 +100,15 @@ individually.
   as `gen types`).
 - **FR-003**: Output MUST be a single SQL file with sections in this
   dependency order: header → schemas → extensions → sequences → types →
-  tables → sequence ownership → constraints (PK/UNIQUE/CHECK/EXCLUDE) →
-  foreign keys → indexes → functions → triggers → views → footer.
+  tables → sequence ownership → functions → deferred column defaults →
+  constraints (PK/UNIQUE/CHECK/EXCLUDE) → foreign keys → views → triggers →
+  indexes → footer. Rationale: functions come after tables (function
+  signatures may use table row types) but before constraints/indexes/views
+  (their expressions may call user functions); column defaults that call
+  user-defined functions are stripped from `CREATE TABLE` and emitted as
+  `ALTER TABLE ... ALTER COLUMN ... SET DEFAULT` after functions; triggers
+  come after views (`INSTEAD OF` triggers); indexes come after views
+  (materialized-view indexes).
 - **FR-004**: The header MUST include a generated-by comment (tool,
   timestamp, schema list) and `SET check_function_bodies = off;`.
 - **FR-005**: All foreign-key constraints MUST be emitted after every
@@ -115,7 +130,14 @@ individually.
 - **FR-009**: Table coverage MUST include: column types, defaults,
   NOT NULL, identity columns (`GENERATED {ALWAYS|BY DEFAULT} AS IDENTITY`,
   with non-default sequence options rendered), generated columns
-  (`GENERATED ALWAYS AS (...) STORED`).
+  (`GENERATED ALWAYS AS (...) STORED`), and `UNLOGGED` persistence.
+  Partition leaf tables (`relispartition`) MUST be excluded from table
+  output (they are footer-listed with their parent). Defaults that call
+  user-defined functions MUST be emitted as deferred
+  `ALTER TABLE ... ALTER COLUMN ... SET DEFAULT` statements after the
+  functions section. Non-default table variants that are NOT reproduced
+  (typed tables, inheritance, non-default access method/tablespace/storage
+  parameters/replica identity) MUST be footer-listed.
 - **FR-010**: Sequence coverage MUST include standalone sequences and
   serial-backing sequences (created before tables, ownership restored via
   `ALTER SEQUENCE ... OWNED BY` after tables); identity-internal sequences
@@ -124,24 +146,42 @@ individually.
 - **FR-012**: Constraint coverage MUST include PK, UNIQUE, CHECK, EXCLUDE,
   and FK (table-level, from the system catalogs — CHECK constraints are not
   inlined in `CREATE TABLE`).
-- **FR-013**: Index coverage MUST include all indexes except those backing
-  constraints (PK/UNIQUE).
+- **FR-013**: Index coverage MUST include all indexes on tables AND
+  materialized views except those backing constraints (PK/UNIQUE/EXCLUDE);
+  the index section is emitted after views so materialized-view indexes
+  resolve.
 - **FR-014**: Function coverage MUST include plain functions and
-  procedures; triggers MUST include non-internal triggers; views MUST
-  include plain views (topologically sorted so referenced views come
-  first) and materialized views.
+  procedures; triggers MUST include non-internal triggers (constraint
+  triggers are emitted via an existence guard, since `CREATE OR REPLACE`
+  does not support them); views MUST include plain views (topologically
+  sorted so referenced views come first) with their options preserved
+  (e.g. `security_barrier`, `check_option`) and materialized views
+  (emitted `WITH NO DATA` when unpopulated at the source). Composite types
+  MUST be topologically sorted (composite-on-composite). Extensions MUST
+  be emitted in creation (oid) order so dependent extensions follow their
+  prerequisites; extension target schemas are included in the schemas
+  section; extension versions are not pinned (v1).
 - **FR-015**: Output MUST be LF-normalized (no CR characters) and end with
   a single trailing newline.
-- **FR-016**: Unsupported objects found in the selected schemas
-  (partitioned tables, aggregate/window functions, domain types) MUST be
-  listed in a footer comment; FKs referencing schemas outside the
-  selection MUST also be listed there.
+- **FR-016**: Unsupported objects found in the selected schemas MUST be
+  listed in a footer comment and never silently dropped: partitioned
+  table hierarchies (parents and their leaf partitions),
+  aggregate/window functions, domain types, non-reproduced table/view
+  variants (FR-009/FR-014), and FKs referencing schemas outside the
+  selection.
 - **FR-017**: `--mode` values other than `baseline` MUST exit 1 with
   `Only --mode baseline is supported in this version (diff is planned).`
 - **FR-018**: A selection that yields zero objects MUST still produce a
-  valid header-only file and print a warning to stderr.
+  valid header-only file (no schema/extension statements either) and print
+  a warning to stderr.
 - **FR-019**: Grants and RLS policies MUST NOT be emitted in v1 (deferred
   to future `--include-grants` / `--include-policies` options).
+- **FR-020**: `generateBaselineSql` and `DbPullOptions` MUST be exported
+  from the package root (`supalite`), alongside the existing exports.
+- **FR-021**: Generated DDL MUST be correct for hostile identifiers and
+  literals (mixed case, reserved words, embedded quotes in names and enum
+  labels) — identifiers server-quoted, literals escaped — verified by
+  round-trip.
 
 ### Key Entities
 
