@@ -134,6 +134,16 @@ describe('generateBaselineSql', () => {
     expect(baseline.slice(viewFns)).toContain('get_paid');
   });
 
+  test('triggers: OR REPLACE for plain, existence guard for constraint triggers, after views', () => {
+    expect(baseline).toContain(
+      'CREATE OR REPLACE TRIGGER orders_touch_status BEFORE UPDATE ON db_pull_schema.orders'
+    );
+    expect(baseline).toContain('CREATE CONSTRAINT TRIGGER orders_ct');
+    expect(baseline).not.toContain('CREATE OR REPLACE CONSTRAINT TRIGGER');
+    expect(baseline).toContain("tgname = 'orders_ct'");
+    expect(baseline.indexOf('-- triggers')).toBeGreaterThan(baseline.indexOf('-- views'));
+  });
+
   test('header, schema creation, and normalization', () => {
     expect(baseline).toContain('-- supalite db pull baseline');
     expect(baseline).toContain('SET check_function_bodies = off;');

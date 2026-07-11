@@ -980,6 +980,48 @@ const renderViews = async (ctx: Ctx): Promise<string[]> => {
   return ['-- views', ...statements];
 };
 
+const renderTriggers = async (ctx: Ctx): Promise<string[]> => {
+  const { rows } = await ctx.client.query<{
+    raw_name: string;
+    table_qualified_raw: string;
+    is_constraint: boolean;
+    definition: string;
+  }>(
+    `SELECT t.tgname AS raw_name,
+            format('%I.%I', n.nspname, c.relname) AS table_qualified_raw,
+            (t.tgconstraint <> 0) AS is_constraint,
+            pg_get_triggerdef(t.oid) AS definition
+     FROM pg_trigger t
+     JOIN pg_class c ON c.oid = t.tgrelid
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = ANY($1)
+       AND NOT t.tgisinternal
+       AND NOT c.relispartition
+       ${extensionFilter(ctx, 'pg_trigger', 't.oid')}
+       ${extensionFilter(ctx, 'pg_class', 'c.oid')}
+     ORDER BY n.nspname, c.relname, t.tgname`,
+    [ctx.schemas]
+  );
+  if (rows.length === 0) {
+    return [];
+  }
+  const statements = rows.map((row) => {
+    const definition = `${normalizeLf(row.definition.trim())};`;
+    if (!ctx.ifNotExists) {
+      return definition;
+    }
+    if (!row.is_constraint) {
+      return definition.replace(/^CREATE TRIGGER /, 'CREATE OR REPLACE TRIGGER ');
+    }
+    // CREATE OR REPLACE is not supported for constraint triggers on any PG
+    // version, so guard by existence instead.
+    const inner = `IF NOT EXISTS (\n    SELECT 1 FROM pg_trigger\n    WHERE tgname = '${escapeLiteral(row.raw_name)}'\n      AND tgrelid = '${escapeLiteral(row.table_qualified_raw)}'::regclass\n  ) THEN\n    ${definition}\n  END IF;`;
+    const tag = dollarTag(inner);
+    return `DO ${tag} BEGIN\n  ${inner}\nEND ${tag};`;
+  });
+  return ['-- triggers', ...statements];
+};
+
 export const generateBaselineSql = async (options: DbPullOptions): Promise<string> => {
   const schemas = options.schemas && options.schemas.length > 0 ? options.schemas : ['public'];
   const client = new Client({ connectionString: options.dbUrl });
@@ -1029,6 +1071,7 @@ export const generateBaselineSql = async (options: DbPullOptions): Promise<strin
     sections.push(constraintSections.foreignKeys);
     sections.push(await renderViews(ctx));
     sections.push(renderFunctionStage(functions, 'view'));
+    sections.push(await renderTriggers(ctx));
     ctx.state.generatedColumnFunctionDeps.forEach((dep) => {
       const worstStage = dep.functionOids
         .map((oid) => functionStageByOid.get(oid) ?? 'type')
