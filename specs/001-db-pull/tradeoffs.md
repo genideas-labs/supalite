@@ -36,7 +36,7 @@
 
 | Option | Pros | Cons |
 |--------|------|------|
-| **CREATE OR REPLACE TRIGGER (chosen)** | Clean single statement | Requires PostgreSQL 14+ on replay target (documented) |
+| **CREATE OR REPLACE TRIGGER (chosen; plain triggers only)** | Clean single statement | Requires PostgreSQL 14+ on replay target (documented). Constraint triggers don't support OR REPLACE on any version → they use a DO existence guard instead (strict-review refinement, see research R5) |
 | DROP TRIGGER IF EXISTS + CREATE | Works on older PG | Not idempotent in effect ordering; briefly drops the trigger on live DB |
 | DO $$ existence guard | Version-safe | Verbose; EXECUTE-quoted DDL harder to read |
 

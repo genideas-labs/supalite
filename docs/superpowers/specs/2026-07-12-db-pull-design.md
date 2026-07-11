@@ -1,5 +1,11 @@
 # `supalite db pull` — Baseline Schema Dump (v1) Design
 
+> **SUPERSEDED**: this initial design was carried into the speckit pipeline
+> and substantially refined through 4 strict review rounds (40 findings).
+> The authoritative artifacts are in [`specs/001-db-pull/`](../../../specs/001-db-pull/spec.md)
+> — notably the section order, function staging, domain support, and
+> exclusion-closure policy differ from what is written below.
+
 - **Date**: 2026-07-12
 - **Issue**: [genideas-labs/supalite#4](https://github.com/genideas-labs/supalite/issues/4)
 - **Status**: Approved (design sections approved in review; flag defaults and

@@ -103,7 +103,10 @@ references an excluded relation) to the footer. v1 multi-stage limitation:
 defaults/CHECKs calling view-stage functions and views calling view-stage
 functions are also footer-diverted rather than re-ordered. Domain
 defaults/CHECKs calling user functions are deferred via
-`ALTER DOMAIN ... SET DEFAULT` (§10) / guarded `ADD CONSTRAINT` (§11).
+`ALTER DOMAIN ... SET DEFAULT` (§10) / guarded `ADD CONSTRAINT` (§11) —
+the domain-constraint guard checks `pg_constraint` by `conname` +
+`contypid = '<schema>.<domain>'::regtype` (domain constraints have
+`conrelid = 0`, so the table-guard form does not apply).
 Table topo edges also resolve `typelem` so a `customers[]` column orders
 after `customers`.
 
@@ -159,9 +162,13 @@ trigger, view, view-on-view, `security_barrier` view, materialized view with
 a unique index, unpopulated matview (`WITH NO DATA`), RLS policy (asserted
 absent), domain + domain-typed column, table-row-type column (table topo),
 array-of-composite attribute, non-default `COLLATE "C"` column, a CHECK
-containing a literal `$$` string, an identifier with an embedded double
-quote, a function body seeded with CRLF (`E'...\r\n...'`), stage-B function
-(`RETURNS SETOF customers`), stage-C function (`RETURNS SETOF paid_orders`),
+containing a literal `$$` string plus one containing `$supalite$` (tag
+fallback to `$supalite1$`), an identifier with an embedded double quote, a
+function body seeded with CRLF (`E'...\r\n...'`), stage-B function
+(`RETURNS SETOF customers`), stage-C functions (`RETURNS SETOF
+paid_orders` and `get_paid(OUT o paid_orders)` for OUT-param
+classification), a partition-parent-dependent view (`events_view`,
+asserted footer-diverted),
 plus footer exercisers: partitioned table + leaf partition and an aggregate
 (+ a view on the aggregate, asserted omitted+footer-listed), and an
 external-schema FK (`db_pull_ext`, whose referenced table intentionally
