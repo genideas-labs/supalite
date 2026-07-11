@@ -196,6 +196,24 @@ describe('generateBaselineSql', () => {
     }
   });
 
+  // The only test that mutates the database: drops and rebuilds the schema
+  // from the generated baseline (all other tests assert on the prebuilt
+  // string). db_pull_ext intentionally stays in place — the documented
+  // pre-existing external prerequisite.
+  test('round-trip: identical regeneration after drop + re-apply; idempotent second apply', async () => {
+    const contentLines = (sql: string): string =>
+      sql
+        .split('\n')
+        .filter((line) => !line.startsWith('--'))
+        .join('\n');
+    const first = await generateBaselineSql({ dbUrl: connectionString, schemas: [schemaName] });
+    await pool.query(`DROP SCHEMA ${schemaName} CASCADE`);
+    await pool.query(first);
+    const second = await generateBaselineSql({ dbUrl: connectionString, schemas: [schemaName] });
+    expect(contentLines(second)).toBe(contentLines(first));
+    await expect(pool.query(first)).resolves.toBeDefined();
+  });
+
   test('header, schema creation, and normalization', () => {
     expect(baseline).toContain('-- supalite db pull baseline');
     expect(baseline).toContain('SET check_function_bodies = off;');
