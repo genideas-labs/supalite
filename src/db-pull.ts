@@ -1053,6 +1053,72 @@ const renderIndexes = async (ctx: Ctx): Promise<string[]> => {
   return ['-- indexes', ...statements];
 };
 
+const renderFooter = async (ctx: Ctx): Promise<string[]> => {
+  const { rows: partitions } = await ctx.client.query<{ parent: string; leaves: string[] }>(
+    `SELECT format('%I.%I', pn.nspname, pc.relname) AS parent,
+            COALESCE(array_agg(format('%I.%I', ln.nspname, lc.relname) ORDER BY lc.relname)
+              FILTER (WHERE lc.oid IS NOT NULL), ARRAY[]::text[]) AS leaves
+     FROM pg_class pc
+     JOIN pg_namespace pn ON pn.oid = pc.relnamespace
+     LEFT JOIN pg_inherits i ON i.inhparent = pc.oid
+     LEFT JOIN pg_class lc ON lc.oid = i.inhrelid
+     LEFT JOIN pg_namespace ln ON ln.oid = lc.relnamespace
+     WHERE pn.nspname = ANY($1) AND pc.relkind = 'p'
+     GROUP BY pn.nspname, pc.relname
+     ORDER BY 1`,
+    [ctx.schemas]
+  );
+  const { rows: aggregates } = await ctx.client.query<{ qualified: string }>(
+    `SELECT format('%I.%I', n.nspname, p.proname) AS qualified
+     FROM pg_proc p
+     JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = ANY($1) AND p.prokind IN ('a', 'w')
+       ${extensionFilter(ctx, 'pg_proc', 'p.oid')}
+     ORDER BY 1`,
+    [ctx.schemas]
+  );
+  const { rows: variants } = await ctx.client.query<{ qualified: string; variants: string[] }>(
+    `SELECT format('%I.%I', n.nspname, c.relname) AS qualified,
+            array_remove(ARRAY[
+              CASE WHEN c.reloftype <> 0 THEN 'typed table' END,
+              CASE WHEN EXISTS (SELECT 1 FROM pg_inherits inh WHERE inh.inhrelid = c.oid) THEN 'inheritance child' END,
+              CASE WHEN c.relam <> 0 AND c.relam <> (SELECT am.oid FROM pg_am am WHERE am.amname = 'heap') THEN 'non-default access method' END,
+              CASE WHEN c.reltablespace <> 0 THEN 'non-default tablespace' END,
+              CASE WHEN c.reloptions IS NOT NULL AND c.relkind = 'r' THEN 'storage parameters' END,
+              CASE WHEN c.relreplident <> 'd' THEN 'non-default replica identity' END
+            ], NULL) AS variants
+     FROM pg_class c
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = ANY($1)
+       AND c.relkind IN ('r', 'm')
+       AND NOT c.relispartition
+       ${extensionFilter(ctx, 'pg_class', 'c.oid')}
+     ORDER BY 1`,
+    [ctx.schemas]
+  );
+  const lines: string[] = [];
+  const unsupported = [
+    ...partitions.map(
+      (row) =>
+        `partitioned table hierarchy: ${row.parent}${row.leaves.length > 0 ? ` (leaves: ${row.leaves.join(', ')})` : ''}`
+    ),
+    ...aggregates.map((row) => `aggregate/window function: ${row.qualified}`),
+    ...variants
+      .filter((row) => row.variants.length > 0)
+      .map((row) => `table variant not reproduced (${row.variants.join(', ')}): ${row.qualified}`),
+    ...ctx.state.footerDiverted,
+  ];
+  if (unsupported.length > 0) {
+    lines.push('-- not included in this baseline (v1 limitations):');
+    unsupported.forEach((entry) => lines.push(`--   ${entry}`));
+  }
+  if (ctx.state.externalRefs.length > 0) {
+    lines.push('-- references outside the selected schemas (must pre-exist before applying):');
+    ctx.state.externalRefs.forEach((entry) => lines.push(`--   ${entry}`));
+  }
+  return lines;
+};
+
 export const generateBaselineSql = async (options: DbPullOptions): Promise<string> => {
   const schemas = options.schemas && options.schemas.length > 0 ? options.schemas : ['public'];
   const client = new Client({ connectionString: options.dbUrl });
@@ -1104,6 +1170,7 @@ export const generateBaselineSql = async (options: DbPullOptions): Promise<strin
     sections.push(renderFunctionStage(functions, 'view'));
     sections.push(await renderTriggers(ctx));
     sections.push(await renderIndexes(ctx));
+    sections.push(await renderFooter(ctx));
     ctx.state.generatedColumnFunctionDeps.forEach((dep) => {
       const worstStage = dep.functionOids
         .map((oid) => functionStageByOid.get(oid) ?? 'type')

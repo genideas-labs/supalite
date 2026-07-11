@@ -83,7 +83,7 @@ describe('generateBaselineSql', () => {
       baseline.indexOf('CREATE TABLE IF NOT EXISTS db_pull_schema.snapshots')
     );
     expect(baseline).not.toContain('CREATE TABLE IF NOT EXISTS db_pull_schema.events_p1');
-    expect(baseline).not.toContain('events_partitioned (');
+    expect(baseline).not.toContain('CREATE TABLE IF NOT EXISTS db_pull_schema.events_partitioned');
     expect(baseline).toContain('ALTER SEQUENCE db_pull_schema.legacy_id_seq OWNED BY db_pull_schema.orders.legacy_id;');
   });
 
@@ -156,6 +156,44 @@ describe('generateBaselineSql', () => {
     expect(baseline).not.toMatch(/CREATE (UNIQUE )?INDEX [^\n]*customers_email_key/);
     expect(baseline).not.toMatch(/CREATE (UNIQUE )?INDEX [^\n]*customers_pkey/);
     expect(baseline).not.toMatch(/CREATE (UNIQUE )?INDEX [^\n]*orders_legacy_id_excl/);
+  });
+
+  test('footer: partition hierarchy, aggregates, diverted dependents, external refs', () => {
+    expect(baseline).toContain('partitioned table hierarchy: db_pull_schema.events_partitioned');
+    expect(baseline).toContain('db_pull_schema.events_p1');
+    expect(baseline).toContain('aggregate/window function: db_pull_schema.agg_sum');
+    expect(baseline).toContain('view depending on excluded objects (not emitted): db_pull_schema.agg_totals');
+    expect(baseline).toContain('view depending on excluded objects (not emitted): db_pull_schema.events_view');
+    expect(baseline).toContain('foreign key to excluded relation (not emitted): db_pull_schema.events_ref.events_ref_event_fkey');
+    expect(baseline).toContain('-- references outside the selected schemas');
+    expect(baseline).toContain('db_pull_ext.ext_ref');
+  });
+
+  test('full section banner order', () => {
+    const banners = [
+      '-- schemas',
+      '-- sequences',
+      '-- types',
+      '-- functions\n',
+      '-- tables',
+      '-- sequence ownership',
+      '-- table-dependent functions',
+      '-- deferred column defaults',
+      '-- constraints',
+      '-- foreign keys',
+      '-- views',
+      '-- view-dependent functions',
+      '-- triggers',
+      '-- indexes',
+    ];
+    const positions = banners.map((banner) => {
+      const pos = baseline.indexOf(banner);
+      expect(pos).toBeGreaterThan(-1);
+      return pos;
+    });
+    for (let i = 1; i < positions.length; i += 1) {
+      expect(positions[i]).toBeGreaterThan(positions[i - 1]);
+    }
   });
 
   test('header, schema creation, and normalization', () => {
