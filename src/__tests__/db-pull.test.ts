@@ -246,7 +246,11 @@ describe('generateBaselineSql', () => {
     const preExisted = (pre.rowCount ?? 0) > 0;
     let available = true;
     try {
-      await pool.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+      // Install into the quiet fixture schema: pulling `public` here races
+      // with parallel suites dropping/creating tables (catalog cache lookups
+      // during deparse fail on concurrently dropped relations — same
+      // limitation as pg_dump under a concurrent DDL storm).
+      await pool.query(`CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA ${schemaName}`);
     } catch {
       available = false;
     }
@@ -255,15 +259,17 @@ describe('generateBaselineSql', () => {
       return;
     }
     try {
-      const filtered = await generateBaselineSql({ dbUrl: connectionString, schemas: ['public'] });
+      const filtered = await generateBaselineSql({ dbUrl: connectionString, schemas: [schemaName] });
       expect(filtered).toContain('CREATE EXTENSION IF NOT EXISTS pg_trgm');
       expect(filtered).not.toContain('gtrgm');
-      const unfiltered = await generateBaselineSql({
-        dbUrl: connectionString,
-        schemas: ['public'],
-        includeExtensionObjects: true,
-      });
-      expect(unfiltered).toContain('gtrgm');
+      if (!preExisted) {
+        const unfiltered = await generateBaselineSql({
+          dbUrl: connectionString,
+          schemas: [schemaName],
+          includeExtensionObjects: true,
+        });
+        expect(unfiltered).toContain('gtrgm');
+      }
     } finally {
       if (!preExisted) {
         await pool.query('DROP EXTENSION IF EXISTS pg_trgm');
