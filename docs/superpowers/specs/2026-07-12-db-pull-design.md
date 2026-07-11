@@ -106,29 +106,33 @@ One SQL file, sections in this order:
    followed by `SET check_function_bodies = off;` so function bodies may
    reference tables/views created later in the file (same technique as
    `pg_dump`).
-2. **Extensions** — `CREATE EXTENSION IF NOT EXISTS "name" WITH SCHEMA ...;`
+2. **Schemas** — `CREATE SCHEMA IF NOT EXISTS` for every selected schema
+   except `public`. Kept even in plain mode (like extensions) so the baseline
+   stands up on an empty database — required for the round-trip test, which
+   drops and recreates the schema from the baseline alone.
+3. **Extensions** — `CREATE EXTENSION IF NOT EXISTS "name" WITH SCHEMA ...;`
    for all non-`plpgsql` extensions. Extensions keep `IF NOT EXISTS` even in
    plain mode (`--no-if-not-exists`) — the issue specifies this form
    unconditionally, and extensions are database-scoped, not schema-scoped.
-3. **Sequences** — all sequences in the target schemas **except**
+4. **Sequences** — all sequences in the target schemas **except**
    identity-internal ones (`pg_depend` `deptype = 'i'`). Emitted before
    tables so `DEFAULT nextval(...)` column defaults resolve. Non-default
    sequence options (START, INCREMENT, MIN/MAXVALUE, CACHE, CYCLE) are
    rendered.
-4. **Types** — enums (`CREATE TYPE ... AS ENUM (...)`) and composite types
+5. **Types** — enums (`CREATE TYPE ... AS ENUM (...)`) and composite types
    (`CREATE TYPE ... AS (...)`). Postgres has no `CREATE TYPE IF NOT EXISTS`,
    so in idempotent mode each is wrapped in
    `DO $$ BEGIN ... EXCEPTION WHEN duplicate_object THEN NULL; END $$;`.
-5. **Tables** — assembled from catalogs (`relkind = 'r'`):
+6. **Tables** — assembled from catalogs (`relkind = 'r'`):
    columns with `format_type()`, defaults via `pg_get_expr(adbin, adrelid)`,
    `NOT NULL`, identity columns as `GENERATED {ALWAYS | BY DEFAULT} AS
    IDENTITY`, with `(START WITH ... INCREMENT BY ...)` when the backing
    sequence has non-default options, and generated columns as
    `GENERATED ALWAYS AS (...) STORED`. `CREATE TABLE IF NOT EXISTS`.
-   CHECK constraints are NOT inlined (emitted in section 6).
-6. **Sequence ownership** — `ALTER SEQUENCE ... OWNED BY table.column` for
+   CHECK constraints are NOT inlined (emitted in section 8).
+7. **Sequence ownership** — `ALTER SEQUENCE ... OWNED BY table.column` for
    serial-style sequences (`pg_depend` `deptype = 'a'`).
-7. **Constraints** — `ALTER TABLE ... ADD CONSTRAINT <name>
+8. **Constraints** — `ALTER TABLE ... ADD CONSTRAINT <name>
    <pg_get_constraintdef(oid)>` in two passes:
    PK / UNIQUE / CHECK / EXCLUDE for all tables first, then **all FKs after
    every table exists** (inline FKs break on circular references).
@@ -146,20 +150,20 @@ One SQL file, sections in this order:
    This closes the idempotency gap the requesting team flagged (no
    `IF NOT EXISTS` exists for `ADD CONSTRAINT`): **constraints are inside the
    idempotency guarantee, not an exception to it.**
-8. **Indexes** — `pg_get_indexdef(oid)` for indexes not backing a constraint
+9. **Indexes** — `pg_get_indexdef(oid)` for indexes not backing a constraint
    (exclude via `pg_constraint.conindid`), with `IF NOT EXISTS` inserted
    after `CREATE [UNIQUE] INDEX` in idempotent mode.
-9. **Functions** — `pg_get_functiondef(oid)` for `prokind IN ('f','p')`
+10. **Functions** — `pg_get_functiondef(oid)` for `prokind IN ('f','p')`
    (already emits `CREATE OR REPLACE`), same pattern as the existing
    `dumpFunctionsSql`.
-10. **Triggers** — `pg_get_triggerdef(oid)` for non-internal triggers
+11. **Triggers** — `pg_get_triggerdef(oid)` for non-internal triggers
     (`NOT tgisinternal`), rewritten to `CREATE OR REPLACE TRIGGER` in
     idempotent mode (requires PostgreSQL 14+ on the target; documented).
-11. **Views** — `CREATE OR REPLACE VIEW <name> AS <pg_get_viewdef(oid, true)>`,
+12. **Views** — `CREATE OR REPLACE VIEW <name> AS <pg_get_viewdef(oid, true)>`,
     topologically sorted by view-to-view dependencies from
     `pg_depend`/`pg_rewrite`. Materialized views use
     `CREATE MATERIALIZED VIEW IF NOT EXISTS`.
-12. **Footer** — comment listing skipped/unsupported objects found in the
+13. **Footer** — comment listing skipped/unsupported objects found in the
     schema (partitioned tables, aggregates, domains), so limitations are
     visible in the artifact itself, not silently dropped.
 
@@ -218,8 +222,8 @@ Assertions:
    `includeExtensionObjects`; skip this case gracefully when the extension is
    unavailable.
 5. **Plain mode** — `ifNotExists: false` emits no `DO $$` guards, plain
-   `CREATE TRIGGER`, and no `IF NOT EXISTS` except on `CREATE EXTENSION`
-   (always kept).
+   `CREATE TRIGGER`, and no `IF NOT EXISTS` except on `CREATE SCHEMA` /
+   `CREATE EXTENSION` (always kept).
 
 ## Documentation
 
