@@ -161,6 +161,50 @@ describe('generateBaselineSql', () => {
     expect(baseline).not.toMatch(/CREATE (UNIQUE )?INDEX [^\n]*orders_legacy_id_excl/);
   });
 
+  test('domain function-dependent default/CHECK are deferred with contypid guards', () => {
+    expect(baseline).toContain('ALTER DOMAIN db_pull_schema.norm_text SET DEFAULT');
+    expect(baseline).toContain('ALTER DOMAIN db_pull_schema.norm_text ADD CONSTRAINT norm_text_check');
+    expect(baseline).toContain("contypid = 'db_pull_schema.norm_text'::regtype");
+    const domainCreate = baseline.indexOf('CREATE DOMAIN db_pull_schema.norm_text AS text;');
+    expect(domainCreate).toBeGreaterThan(-1);
+    expect(baseline.indexOf('ALTER DOMAIN db_pull_schema.norm_text SET DEFAULT')).toBeGreaterThan(domainCreate);
+  });
+
+  test('identity bounds: non-default MINVALUE/CACHE/CYCLE rendered', () => {
+    expect(baseline).toMatch(
+      /id integer GENERATED ALWAYS AS IDENTITY \(START WITH 10 CACHE 5 MINVALUE 10 CYCLE\)/
+    );
+  });
+
+  test('view-stage function interleavings are footer-diverted', () => {
+    expect(baseline).toContain('view depending on excluded objects (not emitted): db_pull_schema.vf_view');
+    expect(baseline).not.toContain('CREATE OR REPLACE VIEW db_pull_schema.vf_view');
+    expect(baseline).toContain(
+      'column default calling a function unavailable in this baseline (not emitted): db_pull_schema.session_cache.vs_col'
+    );
+    expect(baseline).toContain(
+      'constraint calling a function unavailable in this baseline (not emitted): db_pull_schema.session_cache.session_vs_check'
+    );
+    expect(baseline).toContain('CREATE OR REPLACE FUNCTION db_pull_schema.pv_first');
+  });
+
+  test('function dependency inheritance and dynamic diversion', () => {
+    const tableFns = baseline.indexOf('-- table-dependent functions');
+    const tableSection = baseline.slice(tableFns, baseline.indexOf('-- deferred column defaults'));
+    expect(tableSection).toContain('tbl_scalar');
+    expect(tableSection).toContain('wrap2'); // inherited table stage via argument default
+    expect(tableSection.indexOf('tbl_scalar')).toBeLessThan(tableSection.indexOf('wrap2'));
+    expect(baseline).toContain(
+      'function whose signature references a diverted relation (not emitted): db_pull_schema.holder_fn'
+    );
+    expect(baseline).not.toContain('CREATE OR REPLACE FUNCTION db_pull_schema.holder_fn');
+    expect(baseline).toContain(
+      'table with a column of an unavailable type (not emitted): db_pull_schema.gen_blocked'
+    );
+    expect(baseline).not.toContain('CREATE TABLE IF NOT EXISTS db_pull_schema.gen_blocked');
+    expect(baseline).toMatch(/countdown[\s\S]{0,80}\(START WITH -1 INCREMENT BY -1\)/);
+  });
+
   test('footer: partition hierarchy, aggregates, diverted dependents, external refs', () => {
     expect(baseline).toContain('partitioned table hierarchy: db_pull_schema.events_partitioned');
     expect(baseline).toContain('db_pull_schema.events_p1');

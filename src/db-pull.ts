@@ -637,7 +637,6 @@ const renderTables = async (ctx: Ctx, generatedFnBlocked: (oid: string) => boole
     identity: string;
     generated: string;
     default_expr: string | null;
-    default_uses_function: boolean;
     default_function_oids: string[] | null;
     default_type_oids: string[] | null;
     collation_qualified: string | null;
@@ -660,27 +659,44 @@ const renderTables = async (ctx: Ctx, generatedFnBlocked: (oid: string) => boole
               a.attidentity AS identity,
               a.attgenerated AS generated,
               pg_get_expr(ad.adbin, ad.adrelid) AS default_expr,
-              CASE WHEN ad.oid IS NULL THEN false ELSE ${USER_FUNCTION_DEP('pg_attrdef', 'ad.oid')} END AS default_uses_function,
-              CASE WHEN ad.oid IS NULL THEN NULL ELSE (
-                SELECT array_agg(fdep.refobjid::text)
-                FROM pg_depend fdep
-                JOIN pg_proc fproc ON fproc.oid = fdep.refobjid
-                JOIN pg_namespace fns ON fns.oid = fproc.pronamespace
-                WHERE fdep.classid = 'pg_attrdef'::regclass
-                  AND fdep.objid = ad.oid
-                  AND fdep.refclassid = 'pg_proc'::regclass
-                  AND fns.nspname NOT IN ('pg_catalog', 'information_schema')
-              ) END AS default_function_oids,
-              CASE WHEN ad.oid IS NULL THEN NULL ELSE (
-                SELECT array_agg(tdep.refobjid::text)
-                FROM pg_depend tdep
-                JOIN pg_type tt ON tt.oid = tdep.refobjid
-                JOIN pg_namespace tns ON tns.oid = tt.typnamespace
-                WHERE tdep.classid = 'pg_attrdef'::regclass
-                  AND tdep.objid = ad.oid
-                  AND tdep.refclassid = 'pg_type'::regclass
-                  AND tns.nspname NOT IN ('pg_catalog', 'information_schema')
-              ) END AS default_type_oids,
+              -- expression deps live under pg_attrdef for plain DEFAULTs but
+              -- under pg_class/objsubid=<attnum> for GENERATED columns
+              (SELECT array_agg(DISTINCT dep.refobjid::text)
+               FROM (
+                 SELECT fdep.refobjid FROM pg_depend fdep
+                 WHERE ad.oid IS NOT NULL
+                   AND fdep.classid = 'pg_attrdef'::regclass
+                   AND fdep.objid = ad.oid
+                   AND fdep.refclassid = 'pg_proc'::regclass
+                 UNION ALL
+                 SELECT cdep.refobjid FROM pg_depend cdep
+                 WHERE cdep.classid = 'pg_class'::regclass
+                   AND cdep.objid = a.attrelid
+                   AND cdep.objsubid = a.attnum
+                   AND cdep.refclassid = 'pg_proc'::regclass
+               ) dep
+               JOIN pg_proc fproc ON fproc.oid = dep.refobjid
+               JOIN pg_namespace fns ON fns.oid = fproc.pronamespace
+               WHERE fns.nspname NOT IN ('pg_catalog', 'information_schema')
+              ) AS default_function_oids,
+              (SELECT array_agg(DISTINCT dep.refobjid::text)
+               FROM (
+                 SELECT tdep.refobjid FROM pg_depend tdep
+                 WHERE ad.oid IS NOT NULL
+                   AND tdep.classid = 'pg_attrdef'::regclass
+                   AND tdep.objid = ad.oid
+                   AND tdep.refclassid = 'pg_type'::regclass
+                 UNION ALL
+                 SELECT ctdep.refobjid FROM pg_depend ctdep
+                 WHERE ctdep.classid = 'pg_class'::regclass
+                   AND ctdep.objid = a.attrelid
+                   AND ctdep.objsubid = a.attnum
+                   AND ctdep.refclassid = 'pg_type'::regclass
+               ) dep
+               JOIN pg_type tt ON tt.oid = dep.refobjid
+               JOIN pg_namespace tns ON tns.oid = tt.typnamespace
+               WHERE tns.nspname NOT IN ('pg_catalog', 'information_schema')
+              ) AS default_type_oids,
               CASE WHEN col.oid IS NOT NULL THEN format('%I.%I', coll_ns.nspname, col.collname) END AS collation_qualified,
               (a.attcollation <> 0 AND a.attcollation <> typ.typcollation) AS collation_differs,
               iseq.start AS identity_start,
@@ -809,7 +825,7 @@ const renderTables = async (ctx: Ctx, generatedFnBlocked: (oid: string) => boole
           ctx.state.footerDiverted.push(
             `column default referencing an unavailable type (not emitted): ${table.qualified_raw}.${col.name}`
           );
-        } else if (col.default_uses_function) {
+        } else if ((col.default_function_oids ?? []).length > 0) {
           ctx.state.deferredColumnDefaults.push({
             statement: `ALTER TABLE ${table.schema}.${table.name} ALTER COLUMN ${col.name} SET DEFAULT ${col.default_expr};`,
             functionOids: col.default_function_oids ?? [],

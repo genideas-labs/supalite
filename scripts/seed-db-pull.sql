@@ -10,6 +10,8 @@ CREATE TABLE db_pull_ext.ext_ref (id bigint PRIMARY KEY);
 CREATE TYPE db_pull_schema.order_status AS ENUM ('pending', 'paid', 'cancelled');
 CREATE TYPE db_pull_schema.weird_labels AS ENUM ('plain', 'it''s');
 CREATE DOMAIN db_pull_schema.positive_int AS integer CHECK (VALUE > 0);
+-- function-dependent domain default + CHECK exercise the ALTER DOMAIN deferral paths
+CREATE DOMAIN db_pull_schema.norm_text AS text;
 CREATE TYPE db_pull_schema.money_pair AS (amount numeric, currency text);
 CREATE TYPE db_pull_schema.money_bag AS (pairs db_pull_schema.money_pair[], note text);
 
@@ -32,6 +34,15 @@ END;
 $fn$;
 
 CREATE PROCEDURE db_pull_schema.log_noop() LANGUAGE plpgsql AS $$ BEGIN NULL; END $$;
+
+ALTER DOMAIN db_pull_schema.norm_text SET DEFAULT db_pull_schema.norm_email('D@E');
+ALTER DOMAIN db_pull_schema.norm_text ADD CONSTRAINT norm_text_check CHECK (db_pull_schema.norm_email(VALUE) IS NOT NULL);
+
+-- identity with non-default MINVALUE/CACHE/CYCLE (bounds rendering branches)
+CREATE TABLE db_pull_schema.counters (
+  id integer GENERATED ALWAYS AS IDENTITY (MINVALUE 10 START WITH 10 CACHE 5 CYCLE) PRIMARY KEY,
+  note db_pull_schema.norm_text
+);
 
 -- tables
 CREATE TABLE db_pull_schema.customers (
@@ -100,6 +111,24 @@ LANGUAGE sql STABLE AS $$ SELECT count(*) FROM db_pull_schema.orders WHERE custo
 CREATE FUNCTION db_pull_schema.user_rows() RETURNS SETOF db_pull_schema.customers
 LANGUAGE sql STABLE AS $$ SELECT * FROM db_pull_schema.customers $$;
 
+-- table-stage scalar (arg type) + a type-signature function inheriting its
+-- stage through an argument default (CREATE-time resolution)
+CREATE FUNCTION db_pull_schema.tbl_scalar(t db_pull_schema.customers DEFAULT NULL) RETURNS bigint
+LANGUAGE plpgsql IMMUTABLE AS $$ BEGIN RETURN 1; END $$;
+CREATE FUNCTION db_pull_schema.wrap2(x bigint DEFAULT db_pull_schema.tbl_scalar(NULL)) RETURNS bigint
+LANGUAGE plpgsql AS $$ BEGIN RETURN x; END $$;
+
+-- generated column calling a table-stage function sinks its table
+CREATE TABLE db_pull_schema.gen_blocked (
+  x bigint,
+  y bigint GENERATED ALWAYS AS (db_pull_schema.tbl_scalar(NULL) + x) STORED
+);
+
+-- descending identity (bounds branch)
+CREATE TABLE db_pull_schema.countdown (
+  id integer GENERATED ALWAYS AS IDENTITY (INCREMENT BY -1) PRIMARY KEY
+);
+
 -- views
 CREATE VIEW db_pull_schema.paid_orders AS
   SELECT o.id, o.customer_id, o.total FROM db_pull_schema.orders o WHERE o.status = 'paid';
@@ -114,6 +143,15 @@ LANGUAGE sql STABLE AS $$ SELECT * FROM db_pull_schema.paid_orders $$;
 
 CREATE FUNCTION db_pull_schema.get_paid(OUT o db_pull_schema.paid_orders)
 LANGUAGE plpgsql AS $$ BEGIN SELECT p INTO o FROM db_pull_schema.paid_orders p LIMIT 1; END $$;
+
+-- view-stage scalar function (view row type in signature) used by
+-- view/default/constraint interleaving diversions below
+CREATE FUNCTION db_pull_schema.pv_first(p db_pull_schema.paid_orders DEFAULT NULL) RETURNS bigint
+LANGUAGE plpgsql AS $$ BEGIN RETURN 1; END $$;
+
+CREATE VIEW db_pull_schema.vf_view AS SELECT db_pull_schema.pv_first(NULL) AS n;
+ALTER TABLE db_pull_schema.session_cache ADD COLUMN vs_col bigint DEFAULT db_pull_schema.pv_first(NULL);
+ALTER TABLE db_pull_schema.session_cache ADD CONSTRAINT session_vs_check CHECK (db_pull_schema.pv_first(NULL) IS NOT NULL);
 
 -- materialized views
 CREATE MATERIALIZED VIEW db_pull_schema.order_totals_mv AS
@@ -143,6 +181,9 @@ LANGUAGE sql STABLE AS $$ SELECT * FROM db_pull_schema.events_partitioned $$;
 CREATE DOMAIN db_pull_schema.cust_dom AS db_pull_schema.customers;
 CREATE DOMAIN db_pull_schema.cust_dom2 AS db_pull_schema.cust_dom;
 CREATE TABLE db_pull_schema.evt_holder (evt db_pull_schema.events_partitioned);
+-- signature references a table that gets DYNAMICALLY diverted (evt_holder)
+CREATE FUNCTION db_pull_schema.holder_fn(h db_pull_schema.evt_holder DEFAULT NULL) RETURNS bigint
+LANGUAGE plpgsql AS $$ BEGIN RETURN 1; END $$;
 
 CREATE AGGREGATE db_pull_schema.agg_sum(bigint) (SFUNC = int8pl, STYPE = bigint);
 CREATE VIEW db_pull_schema.agg_totals AS
