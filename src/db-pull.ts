@@ -5,7 +5,19 @@ export type DbPullOptions = {
   schemas?: string[];
   includeExtensionObjects?: boolean;
   ifNotExists?: boolean;
+  format?: 'plain' | 'dbmate';
 };
+
+// Wrap the finished baseline in dbmate-compatible migration markers so the file
+// is a drop-in for both dbmate and `supalite migrate` (#7). `plain` is a no-op,
+// which keeps the default output byte-for-byte unchanged (backward compatible).
+// The input is expected to end with a single trailing newline (as
+// generateBaselineSql produces), so the up marker + body + a single blank line
+// + down section yields exactly one blank line before `-- migrate:down`.
+export const formatBaseline = (baseline: string, format: 'plain' | 'dbmate' = 'plain'): string =>
+  format === 'dbmate'
+    ? `-- migrate:up\n${baseline}\n-- migrate:down\n-- baseline: irreversible (no-op)\n`
+    : baseline;
 
 type DeferredDomainConstraint = {
   qualifiedRaw: string;
@@ -1684,6 +1696,7 @@ const renderFooter = async (ctx: Ctx): Promise<string[]> => {
 
 export const generateBaselineSql = async (options: DbPullOptions): Promise<string> => {
   const schemas = options.schemas && options.schemas.length > 0 ? options.schemas : ['public'];
+  const format = options.format ?? 'plain';
   const client = new Client({ connectionString: options.dbUrl });
   await client.connect();
   try {
@@ -1719,7 +1732,7 @@ export const generateBaselineSql = async (options: DbPullOptions): Promise<strin
     if ((await countObjects(ctx)) === 0) {
       console.warn(`Warning: no objects found in schema(s) ${schemas.join(', ')}.`);
       await client.query('COMMIT');
-      return normalizeLf(`${header.join('\n')}\n`);
+      return formatBaseline(normalizeLf(`${header.join('\n')}\n`), format);
     }
     const functions = await classifyFunctions(ctx);
     const functionStageByOid = new Map(functions.map((fn) => [fn.oid, fn.stage]));
@@ -1779,7 +1792,7 @@ export const generateBaselineSql = async (options: DbPullOptions): Promise<strin
       .map((section) => section.join('\n'))
       .join('\n\n');
     await client.query('COMMIT');
-    return normalizeLf(`${header.join('\n')}\n${body ? `\n${body}\n` : ''}`);
+    return formatBaseline(normalizeLf(`${header.join('\n')}\n${body ? `\n${body}\n` : ''}`), format);
   } finally {
     await client.end();
   }
