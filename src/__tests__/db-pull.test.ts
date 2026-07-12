@@ -173,6 +173,8 @@ describe('generateBaselineSql', () => {
     expect(baseline).not.toContain('CREATE OR REPLACE FUNCTION db_pull_schema.evt_rows');
     expect(baseline).toContain('domain based on a relation row type (not emitted): db_pull_schema.cust_dom');
     expect(baseline).toContain('type depending on a diverted type (not emitted): db_pull_schema.cust_dom2');
+    expect(baseline).toContain('table with a column of an unavailable type (not emitted): db_pull_schema.evt_holder');
+    expect(baseline).not.toContain('CREATE TABLE IF NOT EXISTS db_pull_schema.evt_holder');
     expect(baseline).not.toContain('CREATE DOMAIN db_pull_schema.cust_dom');
     expect(baseline).toContain('foreign key to excluded relation (not emitted): db_pull_schema.events_ref.events_ref_event_fkey');
     expect(baseline).toContain('-- references outside the selected schemas');

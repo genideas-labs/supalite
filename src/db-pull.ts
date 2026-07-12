@@ -281,6 +281,65 @@ const identityDefaultBounds = (
   return ascending ? { min: '1', max: limit.max } : { min: limit.min, max: '-1' };
 };
 
+// Shared availability check for expression type dependencies: resolves
+// arrays (typelem) and domain chains (typbasetype), and maps row types
+// (typrelid) onto excluded/diverted relations. Reads the live diversion sets
+// so it stays correct while rendering progresses.
+const createTypeAvailability = async (
+  ctx: Ctx,
+  seedOids: Array<string | null | undefined>
+): Promise<(oid: string) => boolean> => {
+  const map = new Map<string, { elem: string; base: string; relid: string }>();
+  let pending = Array.from(new Set(seedOids.filter((oid): oid is string => !!oid && oid !== '0')));
+  while (pending.length > 0) {
+    const { rows } = await ctx.client.query<{ oid: string; elem: string; base: string; relid: string }>(
+      `SELECT t.oid::text AS oid,
+              t.typelem::text AS elem,
+              t.typbasetype::text AS base,
+              t.typrelid::text AS relid
+       FROM pg_type t
+       WHERE t.oid = ANY($1::oid[])`,
+      [pending]
+    );
+    const next = new Set<string>();
+    rows.forEach((row) => {
+      map.set(row.oid, row);
+      [row.elem, row.base].forEach((oid) => {
+        if (oid !== '0' && !map.has(oid)) {
+          next.add(oid);
+        }
+      });
+    });
+    pending = Array.from(next);
+  }
+  return (oid: string): boolean => {
+    const stack = [oid];
+    const seen = new Set<string>();
+    while (stack.length > 0) {
+      const current = stack.pop() as string;
+      if (current === '0' || seen.has(current)) {
+        continue;
+      }
+      seen.add(current);
+      if (ctx.state.divertedTypes.has(current)) {
+        return true;
+      }
+      const info = map.get(current);
+      if (!info) {
+        continue;
+      }
+      if (
+        info.relid !== '0' &&
+        (ctx.exclusion.relations.has(info.relid) || ctx.state.divertedRelations.has(info.relid))
+      ) {
+        return true;
+      }
+      stack.push(info.elem, info.base);
+    }
+    return false;
+  };
+};
+
 const wrapDuplicateGuard = (statement: string): string => {
   const tag = dollarTag(statement);
   return `DO ${tag} BEGIN\n  ${statement}\nEXCEPTION WHEN duplicate_object THEN NULL; END ${tag};`;
@@ -638,40 +697,36 @@ const renderTables = async (ctx: Ctx): Promise<string[]> => {
   }
 
   const columnTypeOids = new Set<string>();
-  columnsByTable.forEach((columns) => columns.forEach((col) => columnTypeOids.add(col.type_oid)));
+  columnsByTable.forEach((columns) =>
+    columns.forEach((col) => {
+      columnTypeOids.add(col.type_oid);
+      (col.default_type_oids ?? []).forEach((oid) => columnTypeOids.add(oid));
+    })
+  );
   const { resolveRef } = await createTypeResolver(ctx, Array.from(columnTypeOids));
+  const typeUnavailable = await createTypeAvailability(ctx, Array.from(columnTypeOids));
   const tableByRowtype = new Map(tables.map((table) => [table.rowtype_oid, table.oid]));
 
-  // Tables whose columns reference an excluded relation's row type cannot
-  // replay — divert them, to a fixed point so tables referencing diverted
-  // tables' row types divert too (and everything attached, via
-  // divertedRelations).
-  const divertedRowtypes = new Set<string>(ctx.exclusion.rowtypes.keys());
+  // Tables whose columns reference an unavailable type (excluded/diverted
+  // relation row type, diverted domain/composite — arrays and domain chains
+  // resolved) cannot replay. Divert to a fixed point: typeUnavailable reads
+  // the live divertedRelations set, so chains divert too.
   let emittedTables = tables.slice();
   let divertChanged = true;
   while (divertChanged) {
     divertChanged = false;
     emittedTables = emittedTables.filter((table) => {
-      const hit = (columnsByTable.get(table.oid) ?? []).some((col) =>
-        divertedRowtypes.has(resolveRef(col.type_oid))
+      const hit = (columnsByTable.get(table.oid) ?? []).some(
+        (col) =>
+          typeUnavailable(col.type_oid) ||
+          // generated expression referencing an unavailable type is fixed at
+          // CREATE TABLE and cannot be deferred
+          (col.generated === 's' && (col.default_type_oids ?? []).some(typeUnavailable))
       );
-      const typeHit =
-        !hit &&
-        (columnsByTable.get(table.oid) ?? []).some(
-          (col) =>
-            ctx.state.divertedTypes.has(resolveRef(col.type_oid)) ||
-            // generated expression casting a diverted type is fixed at
-            // CREATE TABLE and cannot be deferred
-            (col.generated === 's' &&
-              (col.default_type_oids ?? []).some((oid) => ctx.state.divertedTypes.has(oid)))
-        );
-      if (hit || typeHit) {
+      if (hit) {
         ctx.state.divertedRelations.add(table.oid);
-        divertedRowtypes.add(table.rowtype_oid);
         ctx.state.footerDiverted.push(
-          hit
-            ? `table with a column referencing an excluded relation row type (not emitted): ${table.qualified_raw}`
-            : `table with a column of a diverted type (not emitted): ${table.qualified_raw}`
+          `table with a column of an unavailable type (not emitted): ${table.qualified_raw}`
         );
         divertChanged = true;
         return false;
@@ -733,9 +788,9 @@ const renderTables = async (ctx: Ctx): Promise<string[]> => {
         }
         parts.push(identity);
       } else if (col.default_expr) {
-        if ((col.default_type_oids ?? []).some((oid) => ctx.state.divertedTypes.has(oid))) {
+        if ((col.default_type_oids ?? []).some(typeUnavailable)) {
           ctx.state.footerDiverted.push(
-            `column default referencing a diverted type (not emitted): ${table.qualified_raw}.${col.name}`
+            `column default referencing an unavailable type (not emitted): ${table.qualified_raw}.${col.name}`
           );
         } else if (col.default_uses_function) {
           ctx.state.deferredColumnDefaults.push({
@@ -923,6 +978,11 @@ const renderConstraints = async (
     [ctx.schemas]
   );
 
+  const typeUnavailable = await createTypeAvailability(
+    ctx,
+    rows.flatMap((row) => row.type_oids ?? [])
+  );
+
   const guard = (alter: string, innerCheck: string): string => {
     const inner = `IF NOT EXISTS (\n    ${innerCheck}\n  ) THEN\n    ${alter}\n  END IF;`;
     const tag = dollarTag(inner);
@@ -946,9 +1006,9 @@ const renderConstraints = async (
     if (ctx.state.divertedRelations.has(row.table_oid)) {
       return;
     }
-    if ((row.type_oids ?? []).some((oid) => ctx.state.divertedTypes.has(oid))) {
+    if ((row.type_oids ?? []).some(typeUnavailable)) {
       ctx.state.footerDiverted.push(
-        `constraint referencing a diverted type (not emitted): ${row.qualified_raw}.${row.raw_name}`
+        `constraint referencing an unavailable type (not emitted): ${row.qualified_raw}.${row.raw_name}`
       );
       return;
     }
@@ -1164,15 +1224,22 @@ const renderFunctionStage = (ctx: Ctx, functions: ClassifiedFunction[], stage: F
   return [FUNCTION_STAGE_BANNERS[stage], ...defs.map((fn) => `${normalizeLf(fn.definition.trim())};`)];
 };
 
-const renderDeferredDefaults = (ctx: Ctx, functionUnavailable: (oid: string) => boolean): string[] => {
+const renderDeferredDefaults = async (
+  ctx: Ctx,
+  functionUnavailable: (oid: string) => boolean
+): Promise<string[]> => {
+  const typeUnavailable = await createTypeAvailability(ctx, [
+    ...ctx.state.deferredColumnDefaults.flatMap((deferred) => deferred.typeOids),
+    ...ctx.state.deferredDomainDefaults.flatMap((deferred) => deferred.typeOids),
+  ]);
   const statements: string[] = [];
   const emit = (deferred: DeferredColumnDefault, kind: string): void => {
     if (deferred.ownerTypeOid && ctx.state.divertedTypes.has(deferred.ownerTypeOid)) {
       return; // owner type itself was diverted (already footer-listed)
     }
-    if (deferred.typeOids.some((oid) => ctx.state.divertedTypes.has(oid))) {
+    if (deferred.typeOids.some(typeUnavailable)) {
       ctx.state.footerDiverted.push(
-        `${kind} referencing a diverted type (not emitted): ${deferred.label}`
+        `${kind} referencing an unavailable type (not emitted): ${deferred.label}`
       );
       return;
     }
@@ -1241,6 +1308,10 @@ const renderViews = async (ctx: Ctx, functionUnavailable: (oid: string) => boole
       depsByView.set(dep.view_oid, [...(depsByView.get(dep.view_oid) ?? []), dep]);
     }
   });
+  const typeUnavailable = await createTypeAvailability(
+    ctx,
+    deps.filter((dep) => dep.ref_class === 'pg_type').map((dep) => dep.ref_oid)
+  );
 
   // Divert views depending on excluded objects, transitively (FR-016).
   const diverted = new Set<string>();
@@ -1259,7 +1330,7 @@ const renderViews = async (ctx: Ctx, functionUnavailable: (oid: string) => boole
               diverted.has(dep.ref_oid))) ||
           (dep.ref_class === 'pg_proc' &&
             (ctx.exclusion.functions.has(dep.ref_oid) || functionUnavailable(dep.ref_oid))) ||
-          (dep.ref_class === 'pg_type' && ctx.state.divertedTypes.has(dep.ref_oid))
+          (dep.ref_class === 'pg_type' && typeUnavailable(dep.ref_oid))
       );
       if (hit) {
         diverted.add(view.oid);
@@ -1533,7 +1604,7 @@ export const generateBaselineSql = async (options: DbPullOptions): Promise<strin
         );
       }
     });
-    sections.push(renderDeferredDefaults(ctx, functionUnavailable));
+    sections.push(await renderDeferredDefaults(ctx, functionUnavailable));
     const constraintSections = await renderConstraints(ctx, functionUnavailable);
     sections.push(constraintSections.constraints);
     sections.push(constraintSections.foreignKeys);

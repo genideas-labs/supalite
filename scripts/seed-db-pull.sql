@@ -142,6 +142,7 @@ CREATE FUNCTION db_pull_schema.evt_rows() RETURNS SETOF db_pull_schema.events_pa
 LANGUAGE sql STABLE AS $$ SELECT * FROM db_pull_schema.events_partitioned $$;
 CREATE DOMAIN db_pull_schema.cust_dom AS db_pull_schema.customers;
 CREATE DOMAIN db_pull_schema.cust_dom2 AS db_pull_schema.cust_dom;
+CREATE TABLE db_pull_schema.evt_holder (evt db_pull_schema.events_partitioned);
 
 CREATE AGGREGATE db_pull_schema.agg_sum(bigint) (SFUNC = int8pl, STYPE = bigint);
 CREATE VIEW db_pull_schema.agg_totals AS
