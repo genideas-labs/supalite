@@ -85,6 +85,25 @@ supalite db pull --db-url "$DB_CONNECTION" --format dbmate
 - **dbmate / `supalite migrate` drop-in**: `--format dbmate` wraps the baseline in `-- migrate:up` / `-- migrate:down` markers so `dbmate up` (or the upcoming `supalite migrate up`) applies it with zero manual edits; `--format plain` (default) is unchanged. db pull emits only transaction-safe DDL (all `IF NOT EXISTS`), so the default transactional `-- migrate:up` is correct and atomic — if it ever emits non-transactional DDL, that file must switch to `-- migrate:up transaction:false`.
 - Programmatic API: `import { generateBaselineSql } from 'supalite'` (pass `{ format: 'dbmate' }` for the wrapped output).
 
+### `supalite migrate` (apply + track migrations)
+
+Close the loop between `db pull` (schema → baseline SQL) and `gen types` (schema → TS) with a built-in migration runner — no external tool (dbmate/Flyway) required.
+
+```bash
+supalite migrate new add_orders_table                            # scaffold supabase/migrations/<ts>_add_orders_table.sql
+supalite migrate up      --db-url "$DB_CONNECTION"               # apply pending, in timestamp order
+supalite migrate status  --db-url "$DB_CONNECTION"               # list applied/pending
+supalite migrate mark-applied --all --db-url "$DB_CONNECTION"    # adopt an existing DB (record without running)
+```
+
+- **Migration format** is dbmate-compatible: `-- migrate:up` / `-- migrate:down` sections in `<YYYYMMDDHHMMSS>_<name>.sql`. A `db pull --format dbmate` baseline is a drop-in input.
+- **Tracking table** `public.schema_migrations(version, applied_at)` is created automatically (override with `--migrations-table`). Inserts write only `version`, so an existing dbmate table is compatible.
+- **Payment-DB safety**: the whole `up` run holds a Postgres **advisory lock** (concurrent deploys can't double-apply); each migration's DDL and its version row commit in **one transaction** (a failure rolls back, is not recorded, and stops the run at the first failure).
+- **Concurrent DDL**: mark a migration `-- migrate:up transaction:false` to run statements that can't execute inside a transaction (`CREATE INDEX CONCURRENTLY`, `ALTER TYPE ADD VALUE`); keep such files to a single, idempotent (`IF NOT EXISTS`) statement.
+- `--db-url` falls back to `DB_CONNECTION`, then `DATABASE_URL`. `migrate new` needs no database.
+- `down` is not supported in v1 (forward-only).
+- Programmatic API: `import { migrateUp, migrateStatus, migrateMarkApplied, migrateNew } from 'supalite'`.
+
 ## SupaLite vs Prisma / Drizzle
 
 SupaLite is a lightweight SQL-first client with a Supabase-style query builder. Prisma and Drizzle are ORMs with schema-first workflows and migrations.

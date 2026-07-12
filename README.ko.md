@@ -84,6 +84,25 @@ supalite db pull --db-url "$DB_CONNECTION" --format dbmate
 - **dbmate / `supalite migrate` 드롭인**: `--format dbmate`는 베이스라인을 `-- migrate:up` / `-- migrate:down` 마커로 감싸 `dbmate up`(또는 곧 나올 `supalite migrate up`)에 손 수정 없이 바로 적용됩니다. 기본 `--format plain`은 기존 그대로. db pull은 트랜잭션 안전 DDL만 내므로(전부 `IF NOT EXISTS`) 기본 트랜잭션형 `-- migrate:up`이 옳고 원자적입니다 — 향후 트랜잭션 불가 DDL을 내게 되면 그 파일은 `-- migrate:up transaction:false`로 바꿔야 합니다.
 - 프로그래밍 API: `import { generateBaselineSql } from 'supalite'` (감싼 출력은 `{ format: 'dbmate' }` 전달).
 
+### `supalite migrate` (마이그레이션 적용 + 추적)
+
+`db pull`(스키마 → 베이스라인 SQL)과 `gen types`(스키마 → TS) 사이를 내장 마이그레이션 러너로 연결 — dbmate/Flyway 같은 외부 도구 불필요.
+
+```bash
+supalite migrate new add_orders_table                            # supabase/migrations/<ts>_add_orders_table.sql 생성
+supalite migrate up      --db-url "$DB_CONNECTION"               # 미적용분을 타임스탬프 순으로 적용
+supalite migrate status  --db-url "$DB_CONNECTION"               # 적용/미적용 목록
+supalite migrate mark-applied --all --db-url "$DB_CONNECTION"    # 기존 DB 채택(실행 없이 기록)
+```
+
+- **마이그레이션 포맷**은 dbmate 호환: `<YYYYMMDDHHMMSS>_<name>.sql`의 `-- migrate:up` / `-- migrate:down` 섹션. `db pull --format dbmate` 베이스라인이 그대로 입력으로 드롭인됩니다.
+- **추적 테이블** `public.schema_migrations(version, applied_at)` 자동 생성(`--migrations-table`로 재정의). insert는 `version`만 쓰므로 기존 dbmate 테이블과 호환.
+- **결제 DB 안전**: `up` 전체가 Postgres **advisory lock**을 잡아(동시 배포 이중 적용 차단), 각 마이그레이션의 DDL과 버전 기록이 **한 트랜잭션**으로 커밋됩니다(실패 시 롤백·미기록·즉시 중단).
+- **트랜잭션 불가 DDL**: `-- migrate:up transaction:false`로 트랜잭션 안에서 못 도는 문(`CREATE INDEX CONCURRENTLY`, `ALTER TYPE ADD VALUE`)을 실행. 이런 파일은 단일 멱등(`IF NOT EXISTS`) 문 권장.
+- `--db-url`은 `DB_CONNECTION` → `DATABASE_URL` 순으로 폴백. `migrate new`는 DB 불필요.
+- `down`은 v1 미지원(forward-only).
+- 프로그래밍 API: `import { migrateUp, migrateStatus, migrateMarkApplied, migrateNew } from 'supalite'`.
+
 ## SupaLite vs Prisma / Drizzle
 
 SupaLite는 SQL에 가까운 가벼운 쿼리 클라이언트입니다. Prisma/Drizzle은 스키마 중심의 ORM과 마이그레이션을 제공합니다.
