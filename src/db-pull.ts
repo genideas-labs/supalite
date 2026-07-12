@@ -13,11 +13,14 @@ type DeferredDomainConstraint = {
   nameRaw: string;
   definition: string;
   functionOids: string[];
+  ownerTypeOid: string;
 };
 
 type DeferredColumnDefault = {
   statement: string;
   functionOids: string[];
+  typeOids: string[];
+  ownerTypeOid?: string;
   label: string;
 };
 
@@ -458,6 +461,7 @@ const renderTypes = async (ctx: Ctx): Promise<string[]> => {
           nameRaw: con.name_raw,
           definition: con.definition,
           functionOids: con.function_oids ?? [],
+          ownerTypeOid: row.oid,
         });
       } else {
         parts.push(`CONSTRAINT ${con.name_quoted} ${con.definition}`);
@@ -467,6 +471,8 @@ const renderTypes = async (ctx: Ctx): Promise<string[]> => {
       ctx.state.deferredDomainDefaults.push({
         statement: `ALTER DOMAIN ${row.schema}.${row.name} SET DEFAULT ${row.default_expr};`,
         functionOids: row.default_function_oids ?? [],
+        typeOids: [],
+        ownerTypeOid: row.oid,
         label: row.qualified_raw,
       });
     }
@@ -554,6 +560,7 @@ const renderTables = async (ctx: Ctx): Promise<string[]> => {
     default_expr: string | null;
     default_uses_function: boolean;
     default_function_oids: string[] | null;
+    default_type_oids: string[] | null;
     collation_qualified: string | null;
     collation_differs: boolean;
     identity_start: string | null;
@@ -585,6 +592,16 @@ const renderTables = async (ctx: Ctx): Promise<string[]> => {
                   AND fdep.refclassid = 'pg_proc'::regclass
                   AND fns.nspname NOT IN ('pg_catalog', 'information_schema')
               ) END AS default_function_oids,
+              CASE WHEN ad.oid IS NULL THEN NULL ELSE (
+                SELECT array_agg(tdep.refobjid::text)
+                FROM pg_depend tdep
+                JOIN pg_type tt ON tt.oid = tdep.refobjid
+                JOIN pg_namespace tns ON tns.oid = tt.typnamespace
+                WHERE tdep.classid = 'pg_attrdef'::regclass
+                  AND tdep.objid = ad.oid
+                  AND tdep.refclassid = 'pg_type'::regclass
+                  AND tns.nspname NOT IN ('pg_catalog', 'information_schema')
+              ) END AS default_type_oids,
               CASE WHEN col.oid IS NOT NULL THEN format('%I.%I', coll_ns.nspname, col.collname) END AS collation_qualified,
               (a.attcollation <> 0 AND a.attcollation <> typ.typcollation) AS collation_differs,
               iseq.start AS identity_start,
@@ -640,8 +657,13 @@ const renderTables = async (ctx: Ctx): Promise<string[]> => {
       );
       const typeHit =
         !hit &&
-        (columnsByTable.get(table.oid) ?? []).some((col) =>
-          ctx.state.divertedTypes.has(resolveRef(col.type_oid))
+        (columnsByTable.get(table.oid) ?? []).some(
+          (col) =>
+            ctx.state.divertedTypes.has(resolveRef(col.type_oid)) ||
+            // generated expression casting a diverted type is fixed at
+            // CREATE TABLE and cannot be deferred
+            (col.generated === 's' &&
+              (col.default_type_oids ?? []).some((oid) => ctx.state.divertedTypes.has(oid)))
         );
       if (hit || typeHit) {
         ctx.state.divertedRelations.add(table.oid);
@@ -711,10 +733,15 @@ const renderTables = async (ctx: Ctx): Promise<string[]> => {
         }
         parts.push(identity);
       } else if (col.default_expr) {
-        if (col.default_uses_function) {
+        if ((col.default_type_oids ?? []).some((oid) => ctx.state.divertedTypes.has(oid))) {
+          ctx.state.footerDiverted.push(
+            `column default referencing a diverted type (not emitted): ${table.qualified_raw}.${col.name}`
+          );
+        } else if (col.default_uses_function) {
           ctx.state.deferredColumnDefaults.push({
             statement: `ALTER TABLE ${table.schema}.${table.name} ALTER COLUMN ${col.name} SET DEFAULT ${col.default_expr};`,
             functionOids: col.default_function_oids ?? [],
+            typeOids: col.default_type_oids ?? [],
             label: `${table.qualified_raw}.${col.name}`,
           });
         } else {
@@ -848,6 +875,7 @@ const renderConstraints = async (
     type: string;
     definition: string;
     function_oids: string[] | null;
+    type_oids: string[] | null;
     ref_oid: string | null;
     ref_schema_raw: string | null;
     ref_qualified: string | null;
@@ -868,6 +896,14 @@ const renderConstraints = async (
                AND fdep.objid = con.oid
                AND fdep.refclassid = 'pg_proc'::regclass
                AND fns.nspname NOT IN ('pg_catalog', 'information_schema')) AS function_oids,
+            (SELECT array_agg(tdep.refobjid::text)
+             FROM pg_depend tdep
+             JOIN pg_type tt ON tt.oid = tdep.refobjid
+             JOIN pg_namespace tns ON tns.oid = tt.typnamespace
+             WHERE tdep.classid = 'pg_constraint'::regclass
+               AND tdep.objid = con.oid
+               AND tdep.refclassid = 'pg_type'::regclass
+               AND tns.nspname NOT IN ('pg_catalog', 'information_schema')) AS type_oids,
             NULLIF(con.confrelid, 0)::text AS ref_oid,
             fn.nspname AS ref_schema_raw,
             CASE WHEN con.confrelid <> 0 THEN format('%I.%I', fn.nspname, fcl.relname) END AS ref_qualified
@@ -910,6 +946,12 @@ const renderConstraints = async (
     if (ctx.state.divertedRelations.has(row.table_oid)) {
       return;
     }
+    if ((row.type_oids ?? []).some((oid) => ctx.state.divertedTypes.has(oid))) {
+      ctx.state.footerDiverted.push(
+        `constraint referencing a diverted type (not emitted): ${row.qualified_raw}.${row.raw_name}`
+      );
+      return;
+    }
     if ((row.function_oids ?? []).some(functionUnavailable)) {
       ctx.state.footerDiverted.push(
         `constraint calling a function unavailable in this baseline (not emitted): ${row.qualified_raw}.${row.raw_name}`
@@ -934,6 +976,9 @@ const renderConstraints = async (
   });
 
   ctx.state.deferredDomainConstraints.forEach((domainCon) => {
+    if (ctx.state.divertedTypes.has(domainCon.ownerTypeOid)) {
+      return; // owner domain itself was diverted (already footer-listed)
+    }
     if (domainCon.functionOids.some(functionUnavailable)) {
       ctx.state.footerDiverted.push(
         `domain constraint calling a function unavailable in this baseline (not emitted): ${domainCon.qualifiedRaw}.${domainCon.nameRaw}`
@@ -1122,6 +1167,15 @@ const renderFunctionStage = (ctx: Ctx, functions: ClassifiedFunction[], stage: F
 const renderDeferredDefaults = (ctx: Ctx, functionUnavailable: (oid: string) => boolean): string[] => {
   const statements: string[] = [];
   const emit = (deferred: DeferredColumnDefault, kind: string): void => {
+    if (deferred.ownerTypeOid && ctx.state.divertedTypes.has(deferred.ownerTypeOid)) {
+      return; // owner type itself was diverted (already footer-listed)
+    }
+    if (deferred.typeOids.some((oid) => ctx.state.divertedTypes.has(oid))) {
+      ctx.state.footerDiverted.push(
+        `${kind} referencing a diverted type (not emitted): ${deferred.label}`
+      );
+      return;
+    }
     if (deferred.functionOids.some(functionUnavailable)) {
       ctx.state.footerDiverted.push(
         `${kind} calling a function unavailable in this baseline (not emitted): ${deferred.label}`
@@ -1176,7 +1230,7 @@ const renderViews = async (ctx: Ctx, functionUnavailable: (oid: string) => boole
      FROM pg_depend d
      JOIN pg_rewrite r ON r.oid = d.objid
      WHERE d.classid = 'pg_rewrite'::regclass
-       AND d.refclassid IN ('pg_class'::regclass, 'pg_proc'::regclass)
+       AND d.refclassid IN ('pg_class'::regclass, 'pg_proc'::regclass, 'pg_type'::regclass)
        AND r.ev_class <> d.refobjid`
   );
 
@@ -1204,7 +1258,8 @@ const renderViews = async (ctx: Ctx, functionUnavailable: (oid: string) => boole
               ctx.state.divertedRelations.has(dep.ref_oid) ||
               diverted.has(dep.ref_oid))) ||
           (dep.ref_class === 'pg_proc' &&
-            (ctx.exclusion.functions.has(dep.ref_oid) || functionUnavailable(dep.ref_oid)))
+            (ctx.exclusion.functions.has(dep.ref_oid) || functionUnavailable(dep.ref_oid))) ||
+          (dep.ref_class === 'pg_type' && ctx.state.divertedTypes.has(dep.ref_oid))
       );
       if (hit) {
         diverted.add(view.oid);
@@ -1471,6 +1526,10 @@ export const generateBaselineSql = async (options: DbPullOptions): Promise<strin
       if (worstStage) {
         ctx.state.footerDiverted.push(
           `generated column calling a ${worstStage}-stage function (cannot replay on an empty target): ${dep.qualifiedRaw}.${dep.column}`
+        );
+      } else if (dep.functionOids.some(functionUnavailable)) {
+        ctx.state.footerDiverted.push(
+          `generated column calling a function unavailable in this baseline (cannot replay on an empty target): ${dep.qualifiedRaw}.${dep.column}`
         );
       }
     });
