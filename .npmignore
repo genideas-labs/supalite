@@ -149,3 +149,9 @@ out
 # Test files
 **/*.test.ts
 **/__tests__/
+
+# internal dev/spec artifacts (not for the npm package)
+specs/
+.specify/
+docs/superpowers/
+.gstack/

@@ -62,9 +62,25 @@ SupaLite is intentionally ORM-light. For schema management and migrations, use d
 
 ORM features (relations, nested writes, etc.) are best handled by Prisma/Drizzle/Kysely in a separate service when needed. Keeping SupaLite light is part of the value.
 
-About `supabase db pull`: it is a schema/migration sync step, not an ORM feature. Rather than implementing it inside SupaLite, we recommend documenting the workflow and optionally providing a lightweight CLI wrapper that combines `pg-schema-sync` + type generation.
+About `supabase db pull`: SupaLite ships a native equivalent — `supalite db pull` — that introspects any Postgres via `--db-url` and emits a dependency-ordered baseline migration SQL (see below). Diffing and applying migrations remain the job of the dedicated tools above.
 
 SupaLite now includes `supalite gen types`, which defaults to the SupaLite format (a superset of Supabase CLI output). Use `--format supabase` for byte-for-byte Supabase CLI output.
+
+### `supalite db pull` (baseline schema dump)
+
+Bring an existing database (e.g. after leaving the Supabase platform for Cloud SQL) under version control:
+
+```bash
+supalite db pull --db-url "$DB_CONNECTION" --schema public
+# writes supabase/migrations/<UTC timestamp>_baseline.sql (use --out - for stdout)
+```
+
+- **Dependency-ordered output**: schemas → extensions → sequences → types (enums/domains/composites, topologically sorted) → type-stage functions → tables → sequence ownership → table-dependent functions → deferred column defaults → constraints → foreign keys (always after all tables) → views → view-dependent functions → triggers → indexes → footer notes.
+- **Idempotent by default**: `IF NOT EXISTS` / `CREATE OR REPLACE`, and constraints are wrapped in `DO` guards — re-applying the file to the database it was pulled from is a no-op, constraints included (assumes the executing role owns the objects). Pass `--no-if-not-exists` for plain DDL.
+- **Extension-owned objects are excluded by default** (`pg_depend`), so e.g. `pg_trgm`'s 30+ functions are not dumped individually — `CREATE EXTENSION IF NOT EXISTS` covers them. Pass `--include-extension-objects` to include them.
+- **Nothing is silently dropped**: v1 unsupported objects (partitioned table hierarchies, aggregate/window functions, RLS policies) and anything depending on them are listed in a footer comment instead of emitting failing DDL; dependencies on objects outside the selected schemas are disclosed there too. Grants are omitted in v1 (not enumerated).
+- Replaying the file requires PostgreSQL 14+ on the target (`CREATE OR REPLACE TRIGGER`). `--mode diff` is reserved for a future release.
+- Programmatic API: `import { generateBaselineSql } from 'supalite'`.
 
 ## SupaLite vs Prisma / Drizzle
 
@@ -136,7 +152,7 @@ const data = await db
 - CI matrix for Node/pg versions with integration tests
 - Benchmarks and performance guidance
 - Auth/Storage/Realtime migration guidance (Cognito/GIP, S3/GCS, Realtime options)
-- `supalite db pull` wrapper around `pg-schema-sync` for schema sync
+- `supalite db pull --mode diff` (diff against existing migrations)
 - `supalite gen types` (SupaLite-first generator with Supabase-compatible output)
 - Contribution guide and issue templates
 

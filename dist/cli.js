@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const fs_1 = require("fs");
 const path_1 = __importDefault(require("path"));
 const gen_types_1 = require("./gen-types");
+const db_pull_1 = require("./db-pull");
 const printUsage = () => {
     console.log(`supalite gen types \\
   --db-url <postgres_url> \\
@@ -181,13 +182,120 @@ const parseArgs = (args) => {
     }
     return result;
 };
-const run = async () => {
-    const args = process.argv.slice(2);
-    if (args.length < 2 || args[0] !== 'gen' || args[1] !== 'types') {
-        printUsage();
+const printDbPullUsage = () => {
+    console.log(`supalite db pull \\
+  --db-url <postgres_url> \\
+  [--schema public] \\
+  [--out supabase/migrations/<YYYYMMDDHHMMSS>_baseline.sql] \\
+  [--mode baseline] \\
+  [--include-extension-objects] \\
+  [--no-if-not-exists]
+
+Defaults:
+- schema: public (comma-separated or repeated --schema)
+- out: supabase/migrations/<UTC timestamp>_baseline.sql (use --out - to print to stdout)
+- mode: baseline (diff is planned)
+- extension-owned objects are EXCLUDED (pg_depend deptype 'e'); pass --include-extension-objects to include them
+- idempotent DDL is ON (IF NOT EXISTS / CREATE OR REPLACE / constraint guards); pass --no-if-not-exists for plain DDL
+- replaying triggers requires PostgreSQL 14+ (CREATE OR REPLACE TRIGGER)
+`);
+};
+const parseDbPullArgs = (args) => {
+    const result = {
+        schemas: [],
+        mode: 'baseline',
+        includeExtensionObjects: false,
+        noIfNotExists: false,
+        help: false,
+    };
+    const requireValue = (flag, value) => {
+        if (value === undefined || value.startsWith('--')) {
+            console.error(`Missing value for ${flag}.`);
+            printDbPullUsage();
+            process.exit(1);
+        }
+        return value;
+    };
+    for (let i = 0; i < args.length; i += 1) {
+        const arg = args[i];
+        if (arg === '--help' || arg === '-h') {
+            result.help = true;
+            return result;
+        }
+        if (arg === '--db-url') {
+            result.dbUrl = requireValue(arg, args[i + 1]);
+            i += 1;
+            continue;
+        }
+        if (arg === '--schema' || arg === '--schemas') {
+            requireValue(arg, args[i + 1])
+                .split(',')
+                .map((entry) => entry.trim())
+                .filter(Boolean)
+                .forEach((schema) => result.schemas.push(schema));
+            i += 1;
+            continue;
+        }
+        if (arg === '--out') {
+            result.out = requireValue(arg, args[i + 1]);
+            i += 1;
+            continue;
+        }
+        if (arg === '--mode') {
+            result.mode = requireValue(arg, args[i + 1]);
+            i += 1;
+            continue;
+        }
+        if (arg === '--include-extension-objects') {
+            result.includeExtensionObjects = true;
+            continue;
+        }
+        if (arg === '--no-if-not-exists') {
+            result.noIfNotExists = true;
+            continue;
+        }
+        // A typo like --schmea would otherwise silently pull the wrong baseline.
+        console.error(`Unknown option for db pull: ${arg}`);
+        printDbPullUsage();
         process.exit(1);
     }
-    const parsed = parseArgs(args.slice(2));
+    return result;
+};
+const utcTimestamp = () => new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+const runDbPull = async (rawArgs) => {
+    const parsed = parseDbPullArgs(rawArgs);
+    if (parsed.help) {
+        printDbPullUsage();
+        process.exit(0);
+    }
+    if (parsed.mode !== 'baseline') {
+        console.error('Only --mode baseline is supported in this version (diff is planned).');
+        process.exit(1);
+    }
+    const dbUrl = parsed.dbUrl || process.env.DB_CONNECTION;
+    if (!dbUrl) {
+        console.error('Missing --db-url (or DB_CONNECTION env var).');
+        printDbPullUsage();
+        process.exit(1);
+    }
+    const schemas = parsed.schemas.length > 0 ? parsed.schemas : ['public'];
+    const sql = await (0, db_pull_1.generateBaselineSql)({
+        dbUrl,
+        schemas,
+        includeExtensionObjects: parsed.includeExtensionObjects,
+        ifNotExists: !parsed.noIfNotExists,
+    });
+    if (parsed.out === '-' || parsed.out === 'stdout') {
+        process.stdout.write(sql);
+        return;
+    }
+    const outPath = path_1.default.resolve(parsed.out !== undefined ? parsed.out : path_1.default.join('supabase', 'migrations', `${utcTimestamp()}_baseline.sql`));
+    await fs_1.promises.mkdir(path_1.default.dirname(outPath), { recursive: true });
+    await fs_1.promises.writeFile(outPath, sql, 'utf8');
+    console.log(`Wrote baseline schema to ${outPath}`);
+};
+const runGenTypes = async (rawArgs) => {
+    const parsed = parseArgs(rawArgs);
     if (parsed.help) {
         printUsage();
         process.exit(0);
@@ -231,6 +339,20 @@ const run = async () => {
         await fs_1.promises.writeFile(outPath, functionsSql, 'utf8');
         console.log(`Wrote function definitions to ${outPath}`);
     }
+};
+const run = async () => {
+    const args = process.argv.slice(2);
+    if (args[0] === 'gen' && args[1] === 'types') {
+        await runGenTypes(args.slice(2));
+        return;
+    }
+    if (args[0] === 'db' && args[1] === 'pull') {
+        await runDbPull(args.slice(2));
+        return;
+    }
+    printUsage();
+    printDbPullUsage();
+    process.exit(1);
 };
 run().catch((error) => {
     console.error(error instanceof Error ? error.message : error);
