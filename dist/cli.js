@@ -7,6 +7,7 @@ const fs_1 = require("fs");
 const path_1 = __importDefault(require("path"));
 const gen_types_1 = require("./gen-types");
 const db_pull_1 = require("./db-pull");
+const migrate_1 = require("./migrate");
 const printUsage = () => {
     console.log(`supalite gen types \\
   --db-url <postgres_url> \\
@@ -188,6 +189,7 @@ const printDbPullUsage = () => {
   [--schema public] \\
   [--out supabase/migrations/<YYYYMMDDHHMMSS>_baseline.sql] \\
   [--mode baseline] \\
+  [--format plain|dbmate] \\
   [--include-extension-objects] \\
   [--no-if-not-exists]
 
@@ -195,6 +197,7 @@ Defaults:
 - schema: public (comma-separated or repeated --schema)
 - out: supabase/migrations/<UTC timestamp>_baseline.sql (use --out - to print to stdout)
 - mode: baseline (diff is planned)
+- format: plain (dbmate wraps output in -- migrate:up / -- migrate:down markers, a drop-in for dbmate and supalite migrate)
 - extension-owned objects are EXCLUDED (pg_depend deptype 'e'); pass --include-extension-objects to include them
 - idempotent DDL is ON (IF NOT EXISTS / CREATE OR REPLACE / constraint guards); pass --no-if-not-exists for plain DDL
 - replaying triggers requires PostgreSQL 14+ (CREATE OR REPLACE TRIGGER)
@@ -206,6 +209,7 @@ const parseDbPullArgs = (args) => {
         mode: 'baseline',
         includeExtensionObjects: false,
         noIfNotExists: false,
+        format: 'plain',
         help: false,
     };
     const requireValue = (flag, value) => {
@@ -254,6 +258,17 @@ const parseDbPullArgs = (args) => {
             result.noIfNotExists = true;
             continue;
         }
+        if (arg === '--format') {
+            const value = requireValue(arg, args[i + 1]);
+            if (value !== 'plain' && value !== 'dbmate') {
+                console.error(`Unknown format for db pull: ${value}`);
+                printDbPullUsage();
+                process.exit(1);
+            }
+            result.format = value;
+            i += 1;
+            continue;
+        }
         // A typo like --schmea would otherwise silently pull the wrong baseline.
         console.error(`Unknown option for db pull: ${arg}`);
         printDbPullUsage();
@@ -284,6 +299,7 @@ const runDbPull = async (rawArgs) => {
         schemas,
         includeExtensionObjects: parsed.includeExtensionObjects,
         ifNotExists: !parsed.noIfNotExists,
+        format: parsed.format,
     });
     if (parsed.out === '-' || parsed.out === 'stdout') {
         process.stdout.write(sql);
@@ -340,6 +356,164 @@ const runGenTypes = async (rawArgs) => {
         console.log(`Wrote function definitions to ${outPath}`);
     }
 };
+const printMigrateUsage = () => {
+    console.log(`supalite migrate <up|status|new|mark-applied|down> [options]
+
+Commands:
+  up                 Apply pending migrations in timestamp order
+  status             Show applied/pending migrations
+  new <name>         Create a new migration file from a template
+  mark-applied       Record migrations as applied WITHOUT running them
+  down               (not supported in v1 — forward-only)
+
+Options:
+  --db-url <conn>            Postgres URL (env: DB_CONNECTION, DATABASE_URL)
+  --dir <path>              Migrations directory (default: supabase/migrations)
+  --migrations-table <ref>  Tracking table (default: public.schema_migrations)
+  --dry-run                 (up) Print pending migrations without applying
+  --all                     (mark-applied) Mark every migration file as applied
+
+Examples:
+  supalite migrate up --db-url "$DB_CONNECTION"
+  supalite migrate status
+  supalite migrate new add_orders_table
+  supalite migrate mark-applied --all
+`);
+};
+const parseMigrateArgs = (args) => {
+    const result = { dryRun: false, all: false, help: false };
+    const requireValue = (flag, value) => {
+        if (value === undefined || value.startsWith('--')) {
+            console.error(`Missing value for ${flag}.`);
+            printMigrateUsage();
+            process.exit(1);
+        }
+        return value;
+    };
+    for (let i = 0; i < args.length; i += 1) {
+        const arg = args[i];
+        if (arg === '--help' || arg === '-h') {
+            result.help = true;
+            return result;
+        }
+        if (arg === '--db-url') {
+            result.dbUrl = requireValue(arg, args[i + 1]);
+            i += 1;
+            continue;
+        }
+        if (arg === '--dir') {
+            result.dir = requireValue(arg, args[i + 1]);
+            i += 1;
+            continue;
+        }
+        if (arg === '--migrations-table') {
+            result.migrationsTable = requireValue(arg, args[i + 1]);
+            i += 1;
+            continue;
+        }
+        if (arg === '--dry-run') {
+            result.dryRun = true;
+            continue;
+        }
+        if (arg === '--all') {
+            result.all = true;
+            continue;
+        }
+        if (arg.startsWith('--')) {
+            console.error(`Unknown option for migrate: ${arg}`);
+            printMigrateUsage();
+            process.exit(1);
+        }
+        if (result.sub === undefined) {
+            result.sub = arg;
+            continue;
+        }
+        if (result.positional === undefined) {
+            result.positional = arg;
+            continue;
+        }
+        console.error(`Unexpected argument: ${arg}`);
+        printMigrateUsage();
+        process.exit(1);
+    }
+    return result;
+};
+const resolveMigrateDbUrl = (explicit) => explicit || process.env.DB_CONNECTION || process.env.DATABASE_URL || undefined;
+const runMigrate = async (rawArgs) => {
+    const parsed = parseMigrateArgs(rawArgs);
+    if (parsed.help || !parsed.sub) {
+        printMigrateUsage();
+        process.exit(parsed.help ? 0 : 1);
+    }
+    if (parsed.sub === 'new') {
+        if (!parsed.positional) {
+            console.error('migrate new requires a <name> argument.');
+            printMigrateUsage();
+            process.exit(1);
+        }
+        const created = await (0, migrate_1.migrateNew)({ name: parsed.positional, dir: parsed.dir });
+        console.log(`Created ${created.path}`);
+        return;
+    }
+    if (parsed.sub === 'down') {
+        console.error('migrate down is not supported in this version (forward-only). See issue #7.');
+        process.exit(1);
+    }
+    const dbUrl = resolveMigrateDbUrl(parsed.dbUrl);
+    if (!dbUrl) {
+        console.error('Missing --db-url (or DB_CONNECTION / DATABASE_URL env var).');
+        printMigrateUsage();
+        process.exit(1);
+    }
+    const common = { dbUrl, dir: parsed.dir, migrationsTable: parsed.migrationsTable };
+    if (parsed.sub === 'status') {
+        const entries = await (0, migrate_1.migrateStatus)(common);
+        if (entries.length === 0) {
+            console.log('No migration files found.');
+            return;
+        }
+        entries.forEach((e) => console.log(`${e.applied ? '[x]' : '[ ]'} ${e.version} ${e.name}`));
+        const pending = entries.filter((e) => !e.applied).length;
+        console.log(`\n${entries.length} migration(s), ${pending} pending.`);
+        return;
+    }
+    if (parsed.sub === 'up') {
+        const result = await (0, migrate_1.migrateUp)({ ...common, dryRun: parsed.dryRun });
+        if (parsed.dryRun) {
+            if (result.pending.length === 0) {
+                console.log('No pending migrations.');
+            }
+            else {
+                console.log('Pending migrations (dry run):');
+                result.pending.forEach((v) => console.log(`  ${v}`));
+            }
+            return;
+        }
+        if (result.applied.length === 0) {
+            console.log('No pending migrations. Database is up to date.');
+        }
+        else {
+            console.log(`Applied ${result.applied.length} migration(s):`);
+            result.applied.forEach((v) => console.log(`  ${v}`));
+        }
+        return;
+    }
+    if (parsed.sub === 'mark-applied') {
+        const result = await (0, migrate_1.migrateMarkApplied)({
+            ...common,
+            all: parsed.all,
+            version: parsed.positional,
+        });
+        console.log(`Marked ${result.marked.length} migration(s) as applied.`);
+        if (result.alreadyApplied.length > 0) {
+            console.log(`(${result.alreadyApplied.length} already recorded.)`);
+        }
+        return;
+    }
+    console.error(`Unknown migrate command: ${parsed.sub}`);
+    printMigrateUsage();
+    process.exit(1);
+};
 const run = async () => {
     const args = process.argv.slice(2);
     if (args[0] === 'gen' && args[1] === 'types') {
@@ -350,8 +524,13 @@ const run = async () => {
         await runDbPull(args.slice(2));
         return;
     }
+    if (args[0] === 'migrate') {
+        await runMigrate(args.slice(1));
+        return;
+    }
     printUsage();
     printDbPullUsage();
+    printMigrateUsage();
     process.exit(1);
 };
 run().catch((error) => {

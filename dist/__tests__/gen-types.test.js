@@ -93,4 +93,151 @@ describe('generateTypes', () => {
         expect(outputSupabase).toContain(`foreignKeyName: "gen_types_profiles_user_id_fkey"`);
         expect(outputSupabase).toContain(`Database["public"]["CompositeTypes"]["gen_types_payload"]`);
     });
+    test('maps boolean, unknown, void, array returns and array/unnamed params', async () => {
+        const output = await (0, gen_types_1.generateTypes)({
+            dbUrl: connectionString,
+            schemas: ['public'],
+            format: 'supalite',
+            includeCompositeTypes: true,
+            includeFunctionSignatures: true,
+        });
+        // boolean and "unknown" (point) column mappings
+        expect(output).toContain(`is_active: boolean;`);
+        expect(output).toContain(`location: unknown | null;`);
+        // enum column reference for the newly added 3-value enum
+        expect(output).toContain(`priority: Database['public']['Enums']['gen_types_priority'] | null;`);
+        // composite type carrying an array attribute
+        expect(output).toContain(`labels: string[] | null;`);
+        // function returning void -> undefined
+        expect(output).toContain(`gen_types_void: { Args: Record<string, never>; Returns: undefined; };`);
+        // function returning integer[] via the ARRAY return path
+        expect(output).toContain(`gen_types_int_array: { Args: Record<string, never>; Returns: number[]; };`);
+        // unnamed parameters fall back to arg1/arg2 in supalite
+        expect(output).toContain(`gen_types_unnamed: { Args: { arg1: number; arg2: number; }; Returns: number; };`);
+        // array parameter mapping
+        expect(output).toContain(`gen_types_arr_param: { Args: { vals: number[]; }; Returns: number; };`);
+        // 3-value enum union in the Enums block, and multi-line array form in Constants
+        expect(output).toContain(`gen_types_priority: 'low' | 'medium' | 'high';`);
+        expect(output).toContain(`gen_types_priority: [`);
+    });
+    test('renders SETOF-table return with SetofOptions and inline row columns', async () => {
+        const output = await (0, gen_types_1.generateTypes)({
+            dbUrl: connectionString,
+            schemas: ['public'],
+            format: 'supalite',
+            includeFunctionSignatures: true,
+        });
+        expect(output).toContain(`SetofOptions: { from: '*'; to: 'gen_types_users'; isOneToOne: false; isSetofReturn: true; };`);
+        // return type is an array of the referenced table's row columns
+        expect(output).toContain(`gen_types_users_setof: { Args: Record<string, never>; Returns: ({ id: bigint;`);
+    });
+    test('casing options rewrite type, function and composite names', async () => {
+        const camel = await (0, gen_types_1.generateTypes)({
+            dbUrl: connectionString,
+            schemas: ['public'],
+            format: 'supalite',
+            typeCase: 'camel',
+            functionCase: 'pascal',
+            includeCompositeTypes: true,
+            includeFunctionSignatures: true,
+        });
+        const snake = await (0, gen_types_1.generateTypes)({
+            dbUrl: connectionString,
+            schemas: ['public'],
+            format: 'supalite',
+            typeCase: 'snake',
+            functionCase: 'snake',
+            includeCompositeTypes: true,
+            includeFunctionSignatures: true,
+        });
+        // camel type case + pascal function case ('s' preserved — see splitWords fix)
+        expect(camel).toContain(`genTypesPriority: 'low' | 'medium' | 'high';`);
+        expect(camel).toContain(`Database['public']['Enums']['genTypesPriority']`);
+        expect(camel).toContain(`GenTypesVoid: { Args: Record<string, never>; Returns: undefined; };`);
+        expect(camel).toContain(`GenTypesManyArgs: { Args: { a: number; b: number; c: number; }; Returns: number; };`);
+        expect(camel).toContain(`genTypesMeta: {`);
+        expect(camel).toContain(`Database['public']['CompositeTypes']['genTypesPayload']`);
+        // snake type + function case (already snake -> unchanged; guards against the 's'-dropping bug)
+        expect(snake).toContain(`gen_types_priority: 'low' | 'medium' | 'high';`);
+        expect(snake).toContain(`gen_types_void: { Args: Record<string, never>; Returns: undefined; };`);
+        expect(snake).toContain(`gen_types_many_args: { Args: { a: number; b: number; c: number; }; Returns: number; };`);
+    });
+    test('bigintType option controls bigint column typing', async () => {
+        const asString = await (0, gen_types_1.generateTypes)({
+            dbUrl: connectionString,
+            schemas: ['public'],
+            format: 'supalite',
+            bigintType: 'string',
+        });
+        const asNumber = await (0, gen_types_1.generateTypes)({
+            dbUrl: connectionString,
+            schemas: ['public'],
+            format: 'supalite',
+            bigintType: 'number',
+        });
+        expect(asString).toContain(`id: string;`);
+        expect(asString).toContain(`id?: string;`);
+        expect(asNumber).toContain(`id: number;`);
+        expect(asNumber).toContain(`id?: number;`);
+    });
+    test('supabase suppresses trigger/unnamed-multi-arg fns and renders overloads', async () => {
+        const output = await (0, gen_types_1.generateTypes)({
+            dbUrl: connectionString,
+            schemas: ['public'],
+            format: 'supabase',
+        });
+        // trigger functions and unnamed multi-arg functions are dropped
+        expect(output).not.toContain(`gen_types_trigger_fn`);
+        expect(output).not.toContain(`gen_types_unnamed`);
+        // overloaded function renders a union of Args signatures
+        expect(output).toContain(`| { a: number }`);
+        expect(output).toContain(`| { a: string }`);
+        // function with >2 named args renders multi-line Args
+        expect(output).toContain(`gen_types_many_args: {`);
+        // 3-value enum renders as a multi-line union
+        expect(output).toContain(`| "low"`);
+        expect(output).toContain(`| "medium"`);
+        expect(output).toContain(`| "high"`);
+    });
+    test('includeRelationships:false emits placeholder Relationships', async () => {
+        const supalite = await (0, gen_types_1.generateTypes)({
+            dbUrl: connectionString,
+            schemas: ['public'],
+            format: 'supalite',
+            includeRelationships: false,
+        });
+        const supabase = await (0, gen_types_1.generateTypes)({
+            dbUrl: connectionString,
+            schemas: ['public'],
+            format: 'supabase',
+            includeRelationships: false,
+        });
+        expect(supalite).toContain(`Relationships: unknown[];`);
+        expect(supabase).toContain(`Relationships: []`);
+    });
+    test('view relationships expand through views (view-to-view)', async () => {
+        const output = await (0, gen_types_1.generateTypes)({
+            dbUrl: connectionString,
+            schemas: ['public'],
+            format: 'supalite',
+            includeRelationships: true,
+        });
+        // the profiles view's FK is projected onto both the base table and the users view
+        expect(output).toContain(`referencedRelation: 'gen_types_users';`);
+        expect(output).toContain(`referencedRelation: 'gen_types_users_view';`);
+    });
+    test('dumpFunctionsSql honours includeProcedures option', async () => {
+        const withProcedures = await (0, gen_types_1.dumpFunctionsSql)({
+            dbUrl: connectionString,
+            schemas: ['public'],
+            includeProcedures: true,
+        });
+        const functionsOnly = await (0, gen_types_1.dumpFunctionsSql)({
+            dbUrl: connectionString,
+            schemas: ['public'],
+            includeProcedures: false,
+        });
+        expect(functionsOnly).toContain(`CREATE OR REPLACE FUNCTION public.gen_types_add`);
+        expect(withProcedures).toContain(`CREATE OR REPLACE FUNCTION public.gen_types_add`);
+    });
 });

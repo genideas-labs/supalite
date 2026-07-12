@@ -1,7 +1,17 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateBaselineSql = void 0;
+exports.generateBaselineSql = exports.formatBaseline = void 0;
 const pg_1 = require("pg");
+// Wrap the finished baseline in dbmate-compatible migration markers so the file
+// is a drop-in for both dbmate and `supalite migrate` (#7). `plain` is a no-op,
+// which keeps the default output byte-for-byte unchanged (backward compatible).
+// The input is expected to end with a single trailing newline (as
+// generateBaselineSql produces), so the up marker + body + a single blank line
+// + down section yields exactly one blank line before `-- migrate:down`.
+const formatBaseline = (baseline, format = 'plain') => format === 'dbmate'
+    ? `-- migrate:up\n${baseline}\n-- migrate:down\n-- baseline: irreversible (no-op)\n`
+    : baseline;
+exports.formatBaseline = formatBaseline;
 const escapeLiteral = (value) => value.replace(/'/g, "''");
 const normalizeLf = (text) => text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 const dollarTag = (content) => {
@@ -1271,6 +1281,7 @@ const renderFooter = async (ctx) => {
 };
 const generateBaselineSql = async (options) => {
     const schemas = options.schemas && options.schemas.length > 0 ? options.schemas : ['public'];
+    const format = options.format ?? 'plain';
     const client = new pg_1.Client({ connectionString: options.dbUrl });
     await client.connect();
     try {
@@ -1306,7 +1317,7 @@ const generateBaselineSql = async (options) => {
         if ((await countObjects(ctx)) === 0) {
             console.warn(`Warning: no objects found in schema(s) ${schemas.join(', ')}.`);
             await client.query('COMMIT');
-            return normalizeLf(`${header.join('\n')}\n`);
+            return (0, exports.formatBaseline)(normalizeLf(`${header.join('\n')}\n`), format);
         }
         const functions = await classifyFunctions(ctx);
         const functionStageByOid = new Map(functions.map((fn) => [fn.oid, fn.stage]));
@@ -1361,7 +1372,7 @@ const generateBaselineSql = async (options) => {
             .map((section) => section.join('\n'))
             .join('\n\n');
         await client.query('COMMIT');
-        return normalizeLf(`${header.join('\n')}\n${body ? `\n${body}\n` : ''}`);
+        return (0, exports.formatBaseline)(normalizeLf(`${header.join('\n')}\n${body ? `\n${body}\n` : ''}`), format);
     }
     finally {
         await client.end();
