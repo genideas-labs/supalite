@@ -877,7 +877,10 @@ const renderSequenceOwnership = async (ctx: Ctx): Promise<string[]> => {
      ORDER BY sn.nspname, sc.relname`,
     [ctx.schemas]
   );
-  const emittable = rows.filter((row) => !ctx.state.divertedRelations.has(row.table_oid));
+  const emittable = rows.filter(
+    (row) =>
+      !ctx.state.divertedRelations.has(row.table_oid) && !ctx.exclusion.relations.has(row.table_oid)
+  );
   if (emittable.length === 0) {
     return [];
   }
@@ -1100,6 +1103,7 @@ type ClassifiedFunction = {
   excluded: boolean;
   relationOids: string[];
   typeOids: string[];
+  depFunctionOids: string[];
 };
 
 // Stage functions by what their SIGNATURES reference (bodies are deferred by
@@ -1113,12 +1117,31 @@ const classifyFunctions = async (ctx: Ctx): Promise<ClassifiedFunction[]> => {
     qualified: string;
     rettype: string;
     argtypes: string[];
+    dep_function_oids: string[] | null;
+    dep_type_oids: string[] | null;
   }>(
     `SELECT p.oid::text AS oid,
             pg_get_functiondef(p.oid) AS definition,
             format('%I.%I', n.nspname, p.proname) AS qualified,
             p.prorettype::text AS rettype,
-            ARRAY(SELECT unnest(COALESCE(p.proallargtypes, p.proargtypes::oid[]))::text) AS argtypes
+            ARRAY(SELECT unnest(COALESCE(p.proallargtypes, p.proargtypes::oid[]))::text) AS argtypes,
+            (SELECT array_agg(fdep.refobjid::text)
+             FROM pg_depend fdep
+             JOIN pg_proc fproc ON fproc.oid = fdep.refobjid
+             JOIN pg_namespace fns ON fns.oid = fproc.pronamespace
+             WHERE fdep.classid = 'pg_proc'::regclass
+               AND fdep.objid = p.oid
+               AND fdep.refclassid = 'pg_proc'::regclass
+               AND fdep.refobjid <> p.oid
+               AND fns.nspname NOT IN ('pg_catalog', 'information_schema')) AS dep_function_oids,
+            (SELECT array_agg(tdep.refobjid::text)
+             FROM pg_depend tdep
+             JOIN pg_type tt ON tt.oid = tdep.refobjid
+             JOIN pg_namespace tns ON tns.oid = tt.typnamespace
+             WHERE tdep.classid = 'pg_proc'::regclass
+               AND tdep.objid = p.oid
+               AND tdep.refclassid = 'pg_type'::regclass
+               AND tns.nspname NOT IN ('pg_catalog', 'information_schema')) AS dep_type_oids
      FROM pg_proc p
      JOIN pg_namespace n ON n.oid = p.pronamespace
      WHERE n.nspname = ANY($1)
@@ -1203,7 +1226,7 @@ const classifyFunctions = async (ctx: Ctx): Promise<ClassifiedFunction[]> => {
     const stage: FunctionStage = hasView ? 'view' : hasTable ? 'table' : 'type';
     return { stage, excluded, relationOids, typeOids: Array.from(seen) };
   };
-  return fns.map((fn) => {
+  const classified = fns.map((fn) => {
     const { stage, excluded, relationOids, typeOids } = classify(fn);
     return {
       oid: fn.oid,
@@ -1212,9 +1235,37 @@ const classifyFunctions = async (ctx: Ctx): Promise<ClassifiedFunction[]> => {
       stage,
       excluded,
       relationOids,
-      typeOids,
+      typeOids: Array.from(new Set([...typeOids, ...(fn.dep_type_oids ?? [])])),
+      depFunctionOids: fn.dep_function_oids ?? [],
     };
   });
+  // Argument-default expressions resolve at CREATE FUNCTION time, so a
+  // function inherits the stage (and exclusion) of any function its
+  // defaults call. Propagate to a fixed point.
+  const byOid = new Map(classified.map((fn) => [fn.oid, fn]));
+  const stageRank: Record<FunctionStage, number> = { type: 0, table: 1, view: 2 };
+  const stages: FunctionStage[] = ['type', 'table', 'view'];
+  let stageChanged = true;
+  while (stageChanged) {
+    stageChanged = false;
+    classified.forEach((fn) => {
+      fn.depFunctionOids.forEach((depOid) => {
+        const dep = byOid.get(depOid);
+        if (!dep) {
+          return;
+        }
+        if (dep.excluded && !fn.excluded) {
+          fn.excluded = true;
+          stageChanged = true;
+        }
+        if (stageRank[dep.stage] > stageRank[fn.stage]) {
+          fn.stage = stages[stageRank[dep.stage]];
+          stageChanged = true;
+        }
+      });
+    });
+  }
+  return classified;
 };
 
 const FUNCTION_STAGE_BANNERS: Record<FunctionStage, string> = {
@@ -1247,7 +1298,13 @@ const renderFunctionStage = (ctx: Ctx, functions: ClassifiedFunction[], stage: F
   if (defs.length === 0) {
     return [];
   }
-  return [FUNCTION_STAGE_BANNERS[stage], ...defs.map((fn) => `${normalizeLf(fn.definition.trim())};`)];
+  // Within a stage, order callees before callers (argument-default calls).
+  const ordered = topoSort(
+    defs,
+    (fn) => fn.oid,
+    defs.flatMap((fn) => fn.depFunctionOids.map((dep): [string, string] => [dep, fn.oid]))
+  );
+  return [FUNCTION_STAGE_BANNERS[stage], ...ordered.map((fn) => `${normalizeLf(fn.definition.trim())};`)];
 };
 
 const renderDeferredDefaults = async (
