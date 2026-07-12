@@ -107,12 +107,12 @@ decision trade-offs live in [tradeoffs.md](tradeoffs.md).
 - **Rationale**: `SET check_function_bodies = off` defers only function
   *body* validation — signatures, column defaults, CHECK expressions,
   generated columns, and index predicates resolve at DDL time.
-- **Residual v1 limitations** (all detected and footer-flagged, never
-  silently broken): a generated column calling a table/view-stage function
-  (expression fixed at CREATE TABLE); defaults/CHECKs calling view-stage
-  functions; views calling view-stage functions (multi-stage
-  view↔function interleaving); composites/domains referencing relation
-  row types. Signature scan uses
+- **Residual v1 limitations** (all detected and footer-diverted, never
+  emitted as failing DDL): a table whose generated column calls a
+  table/view-stage or unavailable function (expression fixed at CREATE
+  TABLE); defaults/CHECKs calling view-stage functions; views calling
+  view-stage functions (multi-stage view↔function interleaving);
+  composites/domains referencing relation row types. Signature scan uses
   `COALESCE(proallargtypes, proargtypes::oid[])` so OUT/`RETURNS TABLE`
   columns are classified correctly.
 - **Alternatives**: full `pg_depend` statement-level topological

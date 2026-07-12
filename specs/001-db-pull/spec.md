@@ -199,11 +199,11 @@ individually.
   affected supported DDL — views, FKs, constraints, deferred defaults,
   composites/domains referencing relation row types, and functions whose
   signatures reference excluded relations — to the footer instead.
-  Generated columns calling table/view-stage user functions are
-  footer-flagged (the expression cannot be deferred), as are
+  A generated column calling a table/view-stage (or otherwise unavailable)
+  user function cannot be deferred — its whole table is footer-diverted;
   defaults/CHECKs calling view-stage functions and views calling
-  view-stage functions (multi-stage view↔function interleavings are a
-  documented v1 limitation).
+  view-stage functions are likewise footer-diverted (multi-stage
+  view↔function interleavings are a documented v1 limitation).
 - **FR-017**: `--mode` values other than `baseline` MUST exit 1 with
   `Only --mode baseline is supported in this version (diff is planned).`
 - **FR-018**: A selection that yields zero objects MUST still produce a
