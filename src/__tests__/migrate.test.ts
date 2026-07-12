@@ -375,6 +375,148 @@ describe('migrateMarkApplied (integration)', () => {
   });
 });
 
+const rowCount = async (schema: string, table: string): Promise<number> => {
+  const client = new Client({ connectionString });
+  await client.connect();
+  try {
+    const res = await client.query<{ n: string }>(`SELECT count(*)::text AS n FROM "${schema}"."${table}"`);
+    return Number(res.rows[0].n);
+  } finally {
+    await client.end();
+  }
+};
+
+describe('migrateMarkApplied --dry-run (#14)', () => {
+  test('table absent: previews would-record + SQL and writes nothing', async () => {
+    const env = await makeEnv();
+    try {
+      await writeMigration(env.dir, '20260401000001_a.sql', `-- migrate:up\nSELECT 1;\n`);
+      await writeMigration(env.dir, '20260401000002_b.sql', `-- migrate:up\nSELECT 1;\n`);
+
+      const result = await migrateMarkApplied({
+        dbUrl: connectionString,
+        dir: env.dir,
+        migrationsTable: env.table,
+        all: true,
+        dryRun: true,
+      });
+
+      expect(result.marked).toEqual(['20260401000001', '20260401000002']);
+      expect(result.alreadyApplied).toEqual([]);
+      expect(result.dryRun?.tableExists).toBe(false);
+      expect(result.dryRun?.table).toBe(env.table);
+      // SQL preview: two ensure statements + one insert per would-record version.
+      const sql = result.dryRun?.sql ?? [];
+      expect(sql[0]).toContain('CREATE SCHEMA IF NOT EXISTS');
+      expect(sql[1]).toContain('CREATE TABLE IF NOT EXISTS');
+      expect(sql.filter((s) => s.startsWith('INSERT INTO'))).toHaveLength(2);
+      expect(sql.some((s) => s.includes("VALUES ('20260401000001')"))).toBe(true);
+      // write-free: the tracking table was NOT created.
+      expect(await tableExists(env.schema, 'schema_migrations')).toBe(false);
+    } finally {
+      await cleanupEnv(env);
+    }
+  });
+
+  test('subset already recorded: skips them, no INSERT, rows unchanged; fidelity holds', async () => {
+    const env = await makeEnv();
+    try {
+      await writeMigration(env.dir, '20260402000001_a.sql', `-- migrate:up\nSELECT 1;\n`);
+      await writeMigration(env.dir, '20260402000002_b.sql', `-- migrate:up\nSELECT 1;\n`);
+      // pre-record the first version for real
+      await migrateMarkApplied({
+        dbUrl: connectionString,
+        dir: env.dir,
+        migrationsTable: env.table,
+        version: '20260402000001',
+      });
+      const before = await rowCount(env.schema, 'schema_migrations');
+
+      const dry = await migrateMarkApplied({
+        dbUrl: connectionString,
+        dir: env.dir,
+        migrationsTable: env.table,
+        all: true,
+        dryRun: true,
+      });
+      expect(dry.marked).toEqual(['20260402000002']);
+      expect(dry.alreadyApplied).toEqual(['20260402000001']);
+      expect(dry.dryRun?.tableExists).toBe(true);
+      const inserts = (dry.dryRun?.sql ?? []).filter((s) => s.startsWith('INSERT INTO'));
+      expect(inserts).toHaveLength(1);
+      expect(inserts[0]).toContain("VALUES ('20260402000002')");
+      // no INSERT for the skipped version
+      expect(inserts.some((s) => s.includes("'20260402000001'"))).toBe(false);
+      // dry-run wrote nothing
+      expect(await rowCount(env.schema, 'schema_migrations')).toBe(before);
+
+      // fidelity: the real run records exactly what the dry-run predicted...
+      const real = await migrateMarkApplied({
+        dbUrl: connectionString,
+        dir: env.dir,
+        migrationsTable: env.table,
+        all: true,
+      });
+      expect(real.marked).toEqual(dry.marked);
+      // ...and a subsequent dry-run reports everything already recorded.
+      const dry2 = await migrateMarkApplied({
+        dbUrl: connectionString,
+        dir: env.dir,
+        migrationsTable: env.table,
+        all: true,
+        dryRun: true,
+      });
+      expect(dry2.marked).toEqual([]);
+      expect(dry2.alreadyApplied).toEqual(['20260402000001', '20260402000002']);
+      expect((dry2.dryRun?.sql ?? []).some((s) => s.startsWith('INSERT INTO'))).toBe(false);
+    } finally {
+      await cleanupEnv(env);
+    }
+  });
+
+  test('single version dry-run previews exactly that version', async () => {
+    const env = await makeEnv();
+    try {
+      await writeMigration(env.dir, '20260403000001_a.sql', `-- migrate:up\nSELECT 1;\n`);
+      await writeMigration(env.dir, '20260403000002_b.sql', `-- migrate:up\nSELECT 1;\n`);
+      const dry = await migrateMarkApplied({
+        dbUrl: connectionString,
+        dir: env.dir,
+        migrationsTable: env.table,
+        version: '20260403000002',
+        dryRun: true,
+      });
+      expect(dry.marked).toEqual(['20260403000002']);
+      expect((dry.dryRun?.sql ?? []).filter((s) => s.startsWith('INSERT INTO'))).toHaveLength(1);
+      expect(await tableExists(env.schema, 'schema_migrations')).toBe(false);
+    } finally {
+      await cleanupEnv(env);
+    }
+  });
+});
+
+describe('migrateUp --dry-run is write-free (#14, 003 SC-005)', () => {
+  test('returns pending versions with paths and does not create the tracking table', async () => {
+    const env = await makeEnv();
+    try {
+      await writeMigration(env.dir, '20260404000001_a.sql', `-- migrate:up\nSELECT 1;\n`);
+      const result = await migrateUp({
+        dbUrl: connectionString,
+        dir: env.dir,
+        migrationsTable: env.table,
+        dryRun: true,
+      });
+      expect(result.pending).toEqual(['20260404000001']);
+      expect(result.pendingPaths).toHaveLength(1);
+      expect(result.pendingPaths?.[0]).toContain('20260404000001_a.sql');
+      // the tracking table must NOT have been created by the dry-run
+      expect(await tableExists(env.schema, 'schema_migrations')).toBe(false);
+    } finally {
+      await cleanupEnv(env);
+    }
+  });
+});
+
 describe('dbmate round-trip (SC-006, closes #8 SC-004)', () => {
   test('a db pull --format dbmate baseline applies via migrateUp', async () => {
     const env = await makeEnv();
