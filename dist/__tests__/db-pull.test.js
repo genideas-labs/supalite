@@ -19,6 +19,22 @@ const runSqlFile = async (pool, filePath) => {
     await pool.query(sql);
 };
 jest.setTimeout(180000);
+describe('formatBaseline', () => {
+    const body = '-- supalite db pull baseline\nCREATE TABLE t(id int);\n';
+    test('plain returns the baseline unchanged', () => {
+        expect((0, db_pull_1.formatBaseline)(body, 'plain')).toBe(body);
+        expect((0, db_pull_1.formatBaseline)(body)).toBe(body);
+    });
+    test('dbmate wraps with up/down markers, body unchanged, single trailing newline', () => {
+        const out = (0, db_pull_1.formatBaseline)(body, 'dbmate');
+        expect(out).toBe('-- migrate:up\n' + body + '\n-- migrate:down\n-- baseline: irreversible (no-op)\n');
+        expect(out.startsWith('-- migrate:up\n')).toBe(true);
+        expect(out.endsWith('-- baseline: irreversible (no-op)\n')).toBe(true);
+        expect(out.split('\n').filter((l) => l === '-- migrate:up')).toHaveLength(1);
+        const between = out.slice('-- migrate:up\n'.length, out.indexOf('\n-- migrate:down'));
+        expect(between).toBe(body);
+    });
+});
 describe('generateBaselineSql', () => {
     let pool;
     let baseline;
@@ -33,6 +49,16 @@ describe('generateBaselineSql', () => {
     });
     test('is exported from the package root', () => {
         expect(index_1.generateBaselineSql).toBe(db_pull_1.generateBaselineSql);
+    });
+    test('--format dbmate wraps the plain body exactly (SC-003)', async () => {
+        const plain = await (0, db_pull_1.generateBaselineSql)({ dbUrl: connectionString, schemas: [schemaName], format: 'plain' });
+        const dbmate = await (0, db_pull_1.generateBaselineSql)({ dbUrl: connectionString, schemas: [schemaName], format: 'dbmate' });
+        expect(dbmate.startsWith('-- migrate:up\n')).toBe(true);
+        expect(dbmate).toContain('\n-- migrate:down\n-- baseline: irreversible (no-op)\n');
+        const between = dbmate.slice('-- migrate:up\n'.length, dbmate.lastIndexOf('\n-- migrate:down'));
+        // the header's "generated at" timestamp differs between the two calls; normalize it out
+        const stripTs = (s) => s.replace(/-- generated at: [^\n]*/, '-- generated at: <ts>');
+        expect(stripTs(between)).toBe(stripTs(plain));
     });
     test('sequences: standalone with options, serial-backing, no identity-internal', () => {
         expect(baseline).toContain('CREATE SEQUENCE IF NOT EXISTS db_pull_schema.invoice_seq');

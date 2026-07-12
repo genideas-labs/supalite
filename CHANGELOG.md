@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.11.0] - 2026-07-12
+
+### Added
+- `supalite migrate` (#7): a migration runner that closes the `db pull → migrate → gen types` toolchain — apply + track migrations without an external tool (dbmate/Flyway). Subcommands `up` / `status` / `new` / `mark-applied` (forward-only; `down` is unsupported in v1). Payment-DB safety: the whole `up` run holds a Postgres advisory lock (`pg_advisory_lock(hashtext('supalite:migrate'))`, no concurrent double-apply); each migration's DDL and its `schema_migrations` version row commit in one transaction (a failure rolls back, is not recorded, and stops the run naming the file); a `-- migrate:up transaction:false` escape runs non-transactional DDL (`CREATE INDEX CONCURRENTLY`, `ALTER TYPE ADD VALUE`). dbmate-compatible `-- migrate:up` / `-- migrate:down` format; version = the leading numeric timestamp; tracking table `public.schema_migrations(version, applied_at)` auto-created (`--migrations-table` to relocate; inserts write only `version`, so an existing dbmate table is compatible). `--db-url` falls back to `DB_CONNECTION` then `DATABASE_URL`; `migrate new` needs no database. Programmatic API: `migrateUp` / `migrateStatus` / `migrateMarkApplied` / `migrateNew`.
+- `supalite db pull --format dbmate` (#8): emit the baseline wrapped in `-- migrate:up` / `-- migrate:down` markers so it is a drop-in for both dbmate and `supalite migrate`. Default `--format plain` is byte-for-byte unchanged. Programmatic: `generateBaselineSql({ format: 'dbmate' })`.
+
+### Fixed
+- `gen types` casing: the `splitWords` character class was double-escaped (`/[_\\-\\s]+/`), so `--type-case` / `--function-case` split identifiers on the literal letter `s` (and backslash) instead of underscore/hyphen/whitespace — mangling any name containing `s` (e.g. `gen_types_status` → `genTypeStatus`). Corrected to `/[_\-\s]+/`. Default casing is `preserve`, so existing output is unchanged.
+
+### Tests
+- `migrate` suite: parser units + live-DB integration (apply/idempotent, dry-run, atomic-failure rollback + stop, `transaction:false` `CREATE INDEX CONCURRENTLY`, `mark-applied`, and a `db pull --format dbmate` baseline applied via `migrate up`); `migrate.ts` 98.85% statements.
+- Raised repo coverage: `gen-types.ts` → ~94%, `postgres-client.ts` → ~97% (new live-DB tests); global ≥90%.
+
+### Compatibility
+- Backward-compatible: a new subcommand plus an opt-in `db pull --format`; `--format plain` (default) and every existing API/export are unchanged. Replay/apply targets require PostgreSQL 14+.
+
 ## [0.10.0] - 2026-07-12
 
 ### Added

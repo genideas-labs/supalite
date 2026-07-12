@@ -22,11 +22,13 @@ Compatibility at a glance:
 - ✅ RPC (including `single`/`maybeSingle`)
 - ❌ Auth/Storage/Realtime
 
-## 0.7.2 Highlights
+## 0.11.0 Highlights
 
-- `supalite gen types --format supabase` now matches Supabase CLI output byte-for-byte (ordering + formatting).
-- Default `--format supalite` is a superset with extra schema metadata (constraints/indexes, referenced schema in relationships, set-returning RPC options).
-- New BigInt controls for generated types: `--no-bigint` and `--no-json-bigint`.
+- **`supalite migrate` (#7)**: a built-in migration runner — `up` / `status` / `new` / `mark-applied` — that closes the `db pull → migrate → gen types` toolchain without dbmate/Flyway. Payment-DB safe: advisory-locked `up`, atomic per-migration recording (rollback + stop on failure), and a `transaction:false` escape for `CREATE INDEX CONCURRENTLY`.
+- **`supalite db pull --format dbmate` (#8)**: emit the baseline wrapped in `-- migrate:up` / `-- migrate:down` markers — a drop-in for both dbmate and `supalite migrate`.
+- **Fix**: `gen types` `--type-case` / `--function-case` no longer drops the letter `s` from identifiers (a double-escaped `splitWords` regex).
+
+Earlier (0.7.2): `gen types --format supabase` matches Supabase CLI byte-for-byte; default `--format supalite` superset (constraints/indexes, referenced schema, setof RPC options); BigInt controls `--no-bigint` / `--no-json-bigint`.
 
 Cloud migration note (GCP/AWS):
 If you are moving off Supabase, SupaLite replaces only the **DB query layer**. You still need alternatives for Auth/Storage/Realtime. Typical choices are:
