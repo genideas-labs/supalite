@@ -2,7 +2,7 @@
 
 **Feature Branch**: `002-db-pull-dbmate-format`
 **Created**: 2026-07-12
-**Status**: Clarifying
+**Status**: Implemented
 **Input**: [GitHub issue #8](https://github.com/genideas-labs/supalite/issues/8) (converges with the migration format read by `supalite migrate` #7)
 
 ## User Scenarios & Testing
