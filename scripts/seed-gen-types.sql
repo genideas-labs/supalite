@@ -11,6 +11,19 @@ DROP FUNCTION IF EXISTS public.gen_types_scalar();
 DROP FUNCTION IF EXISTS public.gen_types_set();
 DROP TYPE IF EXISTS public.gen_types_payload;
 DROP TYPE IF EXISTS public.gen_types_status;
+DROP VIEW IF EXISTS public.gen_types_profiles_view;
+DROP FUNCTION IF EXISTS public.gen_types_void();
+DROP FUNCTION IF EXISTS public.gen_types_int_array();
+DROP FUNCTION IF EXISTS public.gen_types_unnamed(integer, integer);
+DROP FUNCTION IF EXISTS public.gen_types_arr_param(integer[]);
+DROP FUNCTION IF EXISTS public.gen_types_users_setof();
+DROP FUNCTION IF EXISTS public.gen_types_overload(integer);
+DROP FUNCTION IF EXISTS public.gen_types_overload(text);
+DROP FUNCTION IF EXISTS public.gen_types_many_args(integer, integer, integer);
+DROP FUNCTION IF EXISTS public.gen_types_trigger_fn();
+DROP TABLE IF EXISTS public.gen_types_kitchen_sink CASCADE;
+DROP TYPE IF EXISTS public.gen_types_meta;
+DROP TYPE IF EXISTS public.gen_types_priority;
 DROP SCHEMA IF EXISTS gen_types_schema CASCADE;
 
 CREATE TYPE public.gen_types_status AS ENUM ('active', 'inactive');
@@ -78,3 +91,80 @@ CREATE TABLE gen_types_schema.gen_types_events (
   payload JSONB,
   scores INTEGER[]
 );
+
+-- Enum with more than two values: exercises multi-line enum rendering
+-- (supabase union form) and the array Constants form.
+CREATE TYPE public.gen_types_priority AS ENUM ('low', 'medium', 'high');
+
+-- Composite type carrying an array attribute: exercises composite array mapping.
+CREATE TYPE public.gen_types_meta AS (
+  labels TEXT[],
+  count INTEGER
+);
+
+-- Table with a boolean column, an "unknown" (point) column, and an enum column.
+CREATE TABLE public.gen_types_kitchen_sink (
+  id BIGSERIAL PRIMARY KEY,
+  is_active BOOLEAN NOT NULL,
+  location POINT,
+  priority public.gen_types_priority
+);
+
+-- View exposing the foreign-key column of gen_types_profiles so that
+-- view-to-table / table-to-view / view-to-view relationships are derived.
+CREATE VIEW public.gen_types_profiles_view AS
+SELECT id, user_id, nickname FROM public.gen_types_profiles;
+
+-- Function returning void -> Returns: undefined.
+CREATE OR REPLACE FUNCTION public.gen_types_void()
+RETURNS void
+LANGUAGE sql
+AS $$ SELECT NULL::void $$;
+
+-- Function returning an array type via ARRAY return path.
+CREATE OR REPLACE FUNCTION public.gen_types_int_array()
+RETURNS integer[]
+LANGUAGE sql
+AS $$ SELECT ARRAY[1, 2, 3] $$;
+
+-- Function with unnamed parameters -> arg1/arg2 fallback naming (supalite),
+-- and unnamed multi-arg suppression (supabase).
+CREATE OR REPLACE FUNCTION public.gen_types_unnamed(integer, integer)
+RETURNS integer
+LANGUAGE sql
+AS $$ SELECT $1 + $2 $$;
+
+-- Function with an array parameter -> array parameter mapping.
+CREATE OR REPLACE FUNCTION public.gen_types_arr_param(vals integer[])
+RETURNS integer
+LANGUAGE sql
+AS $$ SELECT COALESCE(array_length(vals, 1), 0) $$;
+
+-- Function returning SETOF a base table -> table-column return + SetofOptions.
+CREATE OR REPLACE FUNCTION public.gen_types_users_setof()
+RETURNS SETOF public.gen_types_users
+LANGUAGE sql
+AS $$ SELECT * FROM public.gen_types_users $$;
+
+-- Overloaded function (two signatures) -> multi-signature rendering.
+CREATE OR REPLACE FUNCTION public.gen_types_overload(a integer)
+RETURNS integer
+LANGUAGE sql
+AS $$ SELECT a $$;
+
+CREATE OR REPLACE FUNCTION public.gen_types_overload(a text)
+RETURNS text
+LANGUAGE sql
+AS $$ SELECT a $$;
+
+-- Function with more than two named args -> multi-line Args (supabase).
+CREATE OR REPLACE FUNCTION public.gen_types_many_args(a integer, b integer, c integer)
+RETURNS integer
+LANGUAGE sql
+AS $$ SELECT a + b + c $$;
+
+-- Trigger function -> suppressed in supabase output.
+CREATE OR REPLACE FUNCTION public.gen_types_trigger_fn()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$ BEGIN RETURN NEW; END; $$;
