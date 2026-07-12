@@ -12,6 +12,7 @@ type DeferredDomainConstraint = {
   nameQuoted: string;
   nameRaw: string;
   definition: string;
+  functionOids: string[];
 };
 
 type DeferredColumnDefault = {
@@ -23,7 +24,7 @@ type DeferredColumnDefault = {
 type PullState = {
   deferredColumnDefaults: DeferredColumnDefault[];
   divertedRelations: Set<string>;
-  deferredDomainDefaults: string[];
+  deferredDomainDefaults: DeferredColumnDefault[];
   deferredDomainConstraints: DeferredDomainConstraint[];
   generatedColumnFunctionDeps: Array<{ qualifiedRaw: string; column: string; functionOids: string[] }>;
   footerDiverted: string[];
@@ -322,6 +323,7 @@ const renderTypes = async (ctx: Ctx): Promise<string[]> => {
     not_null: boolean;
     default_expr: string | null;
     default_uses_function: boolean;
+    default_function_oids: string[] | null;
   }>(
     `SELECT t.oid::text AS oid,
             quote_ident(n.nspname) AS schema,
@@ -331,7 +333,15 @@ const renderTypes = async (ctx: Ctx): Promise<string[]> => {
             t.typbasetype::text AS base_ref,
             t.typnotnull AS not_null,
             pg_get_expr(t.typdefaultbin, 0) AS default_expr,
-            ${USER_FUNCTION_DEP('pg_type', 't.oid')} AS default_uses_function
+            ${USER_FUNCTION_DEP('pg_type', 't.oid')} AS default_uses_function,
+            (SELECT array_agg(fdep.refobjid::text)
+             FROM pg_depend fdep
+             JOIN pg_proc fproc ON fproc.oid = fdep.refobjid
+             JOIN pg_namespace fns ON fns.oid = fproc.pronamespace
+             WHERE fdep.classid = 'pg_type'::regclass
+               AND fdep.objid = t.oid
+               AND fdep.refclassid = 'pg_proc'::regclass
+               AND fns.nspname NOT IN ('pg_catalog', 'information_schema')) AS default_function_oids
      FROM pg_type t
      JOIN pg_namespace n ON n.oid = t.typnamespace
      WHERE t.typtype = 'd'
@@ -347,12 +357,21 @@ const renderTypes = async (ctx: Ctx): Promise<string[]> => {
     name_raw: string;
     definition: string;
     uses_function: boolean;
+    function_oids: string[] | null;
   }>(
     `SELECT con.contypid::text AS type_oid,
             quote_ident(con.conname) AS name_quoted,
             con.conname AS name_raw,
             pg_get_constraintdef(con.oid) AS definition,
-            ${USER_FUNCTION_DEP('pg_constraint', 'con.oid')} AS uses_function
+            ${USER_FUNCTION_DEP('pg_constraint', 'con.oid')} AS uses_function,
+            (SELECT array_agg(fdep.refobjid::text)
+             FROM pg_depend fdep
+             JOIN pg_proc fproc ON fproc.oid = fdep.refobjid
+             JOIN pg_namespace fns ON fns.oid = fproc.pronamespace
+             WHERE fdep.classid = 'pg_constraint'::regclass
+               AND fdep.objid = con.oid
+               AND fdep.refclassid = 'pg_proc'::regclass
+               AND fns.nspname NOT IN ('pg_catalog', 'information_schema')) AS function_oids
      FROM pg_constraint con
      JOIN pg_type t ON t.oid = con.contypid
      JOIN pg_namespace n ON n.oid = t.typnamespace
@@ -411,6 +430,12 @@ const renderTypes = async (ctx: Ctx): Promise<string[]> => {
   });
 
   domains.forEach((row) => {
+    if (referencesRelation([row.base_ref])) {
+      ctx.state.footerDiverted.push(
+        `domain based on a relation row type (not emitted): ${row.qualified_raw}`
+      );
+      return;
+    }
     const parts = [`CREATE DOMAIN ${row.schema}.${row.name} AS ${row.base_type}`];
     if (row.default_expr && !row.default_uses_function) {
       parts.push(`DEFAULT ${row.default_expr}`);
@@ -425,15 +450,18 @@ const renderTypes = async (ctx: Ctx): Promise<string[]> => {
           nameQuoted: con.name_quoted,
           nameRaw: con.name_raw,
           definition: con.definition,
+          functionOids: con.function_oids ?? [],
         });
       } else {
         parts.push(`CONSTRAINT ${con.name_quoted} ${con.definition}`);
       }
     });
     if (row.default_expr && row.default_uses_function) {
-      ctx.state.deferredDomainDefaults.push(
-        `ALTER DOMAIN ${row.schema}.${row.name} SET DEFAULT ${row.default_expr};`
-      );
+      ctx.state.deferredDomainDefaults.push({
+        statement: `ALTER DOMAIN ${row.schema}.${row.name} SET DEFAULT ${row.default_expr};`,
+        functionOids: row.default_function_oids ?? [],
+        label: row.qualified_raw,
+      });
     }
     items.push({ oid: row.oid, sql: `${parts.join(' ')};` });
     edges.push([resolveRef(row.base_ref), row.oid]);
@@ -570,20 +598,30 @@ const renderTables = async (ctx: Ctx): Promise<string[]> => {
   const tableByRowtype = new Map(tables.map((table) => [table.rowtype_oid, table.oid]));
 
   // Tables whose columns reference an excluded relation's row type cannot
-  // replay — divert them (and everything attached, via divertedRelations).
-  const emittedTables = tables.filter((table) => {
-    const hit = (columnsByTable.get(table.oid) ?? []).find((col) =>
-      ctx.exclusion.rowtypes.has(resolveRef(col.type_oid))
-    );
-    if (hit) {
-      ctx.state.divertedRelations.add(table.oid);
-      ctx.state.footerDiverted.push(
-        `table with a column referencing an excluded relation row type (not emitted): ${table.qualified_raw}`
+  // replay — divert them, to a fixed point so tables referencing diverted
+  // tables' row types divert too (and everything attached, via
+  // divertedRelations).
+  const divertedRowtypes = new Set<string>(ctx.exclusion.rowtypes.keys());
+  let emittedTables = tables.slice();
+  let divertChanged = true;
+  while (divertChanged) {
+    divertChanged = false;
+    emittedTables = emittedTables.filter((table) => {
+      const hit = (columnsByTable.get(table.oid) ?? []).some((col) =>
+        divertedRowtypes.has(resolveRef(col.type_oid))
       );
-      return false;
-    }
-    return true;
-  });
+      if (hit) {
+        ctx.state.divertedRelations.add(table.oid);
+        divertedRowtypes.add(table.rowtype_oid);
+        ctx.state.footerDiverted.push(
+          `table with a column referencing an excluded relation row type (not emitted): ${table.qualified_raw}`
+        );
+        divertChanged = true;
+        return false;
+      }
+      return true;
+    });
+  }
 
   const edges: Array<[string, string]> = [];
   emittedTables.forEach((table) => {
@@ -763,7 +801,8 @@ const computeExclusion = async (ctx: Ctx): Promise<Exclusion> => {
 
 const renderConstraints = async (
   ctx: Ctx,
-  stageByOid: Map<string, FunctionStage>
+  stageByOid: Map<string, FunctionStage>,
+  excludedFunctionOids: Set<string>
 ): Promise<{ constraints: string[]; foreignKeys: string[] }> => {
   const { rows } = await ctx.client.query<{
     schema: string;
@@ -837,6 +876,12 @@ const renderConstraints = async (
     if (ctx.state.divertedRelations.has(row.table_oid)) {
       return;
     }
+    if ((row.function_oids ?? []).some((oid) => excludedFunctionOids.has(oid))) {
+      ctx.state.footerDiverted.push(
+        `constraint calling an excluded function (not emitted): ${row.qualified_raw}.${row.raw_name}`
+      );
+      return;
+    }
     if ((row.function_oids ?? []).some((oid) => stageByOid.get(oid) === 'view')) {
       ctx.state.footerDiverted.push(
         `constraint calling a view-stage function (not emitted): ${row.qualified_raw}.${row.raw_name}`
@@ -860,6 +905,16 @@ const renderConstraints = async (
   });
 
   ctx.state.deferredDomainConstraints.forEach((domainCon) => {
+    if (
+      domainCon.functionOids.some(
+        (oid) => excludedFunctionOids.has(oid) || stageByOid.get(oid) === 'view'
+      )
+    ) {
+      ctx.state.footerDiverted.push(
+        `domain constraint calling an excluded or view-stage function (not emitted): ${domainCon.qualifiedRaw}.${domainCon.nameRaw}`
+      );
+      return;
+    }
     const alter = `ALTER DOMAIN ${domainCon.qualifiedRaw} ADD CONSTRAINT ${domainCon.nameQuoted} ${domainCon.definition};`;
     if (!ctx.ifNotExists) {
       constraints.push(alter);
@@ -887,6 +942,7 @@ type ClassifiedFunction = {
   stage: FunctionStage;
   qualified: string;
   excluded: boolean;
+  relationOids: string[];
 };
 
 // Stage functions by what their SIGNATURES reference (bodies are deferred by
@@ -950,9 +1006,13 @@ const classifyFunctions = async (ctx: Ctx): Promise<ClassifiedFunction[]> => {
     });
     frontier = Array.from(next);
   }
-  const classify = (fn: { rettype: string; argtypes: string[] }): { stage: FunctionStage; excluded: boolean } => {
+  const classify = (fn: {
+    rettype: string;
+    argtypes: string[];
+  }): { stage: FunctionStage; excluded: boolean; relationOids: string[] } => {
     const seen = new Set<string>();
     const stack = [fn.rettype, ...fn.argtypes];
+    const relationOids: string[] = [];
     let hasTable = false;
     let hasView = false;
     let excluded = false;
@@ -966,8 +1026,11 @@ const classifyFunctions = async (ctx: Ctx): Promise<ClassifiedFunction[]> => {
       if (!typeInfo) {
         continue;
       }
-      if (typeInfo.relid !== '' && ctx.exclusion.relations.has(typeInfo.relid)) {
-        excluded = true;
+      if (typeInfo.relid !== '') {
+        relationOids.push(typeInfo.relid);
+        if (ctx.exclusion.relations.has(typeInfo.relid)) {
+          excluded = true;
+        }
       }
       if (typeInfo.relkind === 'v' || typeInfo.relkind === 'm') {
         hasView = true;
@@ -981,11 +1044,11 @@ const classifyFunctions = async (ctx: Ctx): Promise<ClassifiedFunction[]> => {
       typeInfo.attrs.forEach((attr) => stack.push(attr));
     }
     const stage: FunctionStage = hasView ? 'view' : hasTable ? 'table' : 'type';
-    return { stage, excluded };
+    return { stage, excluded, relationOids };
   };
   return fns.map((fn) => {
-    const { stage, excluded } = classify(fn);
-    return { oid: fn.oid, definition: fn.definition, qualified: fn.qualified, stage, excluded };
+    const { stage, excluded, relationOids } = classify(fn);
+    return { oid: fn.oid, definition: fn.definition, qualified: fn.qualified, stage, excluded, relationOids };
   });
 };
 
@@ -995,33 +1058,57 @@ const FUNCTION_STAGE_BANNERS: Record<FunctionStage, string> = {
   view: '-- view-dependent functions',
 };
 
-const renderFunctionStage = (functions: ClassifiedFunction[], stage: FunctionStage): string[] => {
-  const defs = functions.filter((fn) => fn.stage === stage);
+const renderFunctionStage = (ctx: Ctx, functions: ClassifiedFunction[], stage: FunctionStage): string[] => {
+  const defs = functions.filter((fn) => {
+    if (fn.stage !== stage) {
+      return false;
+    }
+    // Signature references a relation that was diverted while rendering
+    // (excluded-rowtype table, view depending on excluded objects, ...).
+    if (fn.relationOids.some((oid) => ctx.state.divertedRelations.has(oid))) {
+      ctx.state.footerDiverted.push(
+        `function whose signature references a diverted relation (not emitted): ${fn.qualified}`
+      );
+      return false;
+    }
+    return true;
+  });
   if (defs.length === 0) {
     return [];
   }
   return [FUNCTION_STAGE_BANNERS[stage], ...defs.map((fn) => `${normalizeLf(fn.definition.trim())};`)];
 };
 
-const renderDeferredDefaults = (ctx: Ctx, stageByOid: Map<string, FunctionStage>): string[] => {
+const renderDeferredDefaults = (
+  ctx: Ctx,
+  stageByOid: Map<string, FunctionStage>,
+  excludedFunctionOids: Set<string>
+): string[] => {
   const statements: string[] = [];
-  ctx.state.deferredColumnDefaults.forEach((deferred) => {
+  const emit = (deferred: DeferredColumnDefault, kind: string): void => {
+    if (deferred.functionOids.some((oid) => excludedFunctionOids.has(oid))) {
+      ctx.state.footerDiverted.push(
+        `${kind} calling an excluded function (not emitted): ${deferred.label}`
+      );
+      return;
+    }
     if (deferred.functionOids.some((oid) => stageByOid.get(oid) === 'view')) {
       ctx.state.footerDiverted.push(
-        `column default calling a view-stage function (not emitted): ${deferred.label}`
+        `${kind} calling a view-stage function (not emitted): ${deferred.label}`
       );
       return;
     }
     statements.push(deferred.statement);
-  });
-  statements.push(...ctx.state.deferredDomainDefaults);
+  };
+  ctx.state.deferredColumnDefaults.forEach((deferred) => emit(deferred, 'column default'));
+  ctx.state.deferredDomainDefaults.forEach((deferred) => emit(deferred, 'domain default'));
   if (statements.length === 0) {
     return [];
   }
   return ['-- deferred column defaults', ...statements];
 };
 
-const renderViews = async (ctx: Ctx, viewStageFunctionOids: Set<string>): Promise<string[]> => {
+const renderViews = async (ctx: Ctx, unavailableFunctionOids: Set<string>): Promise<string[]> => {
   const { rows: views } = await ctx.client.query<{
     oid: string;
     schema: string;
@@ -1087,10 +1174,11 @@ const renderViews = async (ctx: Ctx, viewStageFunctionOids: Set<string>): Promis
               ctx.state.divertedRelations.has(dep.ref_oid) ||
               diverted.has(dep.ref_oid))) ||
           (dep.ref_class === 'pg_proc' &&
-            (ctx.exclusion.functions.has(dep.ref_oid) || viewStageFunctionOids.has(dep.ref_oid)))
+            (ctx.exclusion.functions.has(dep.ref_oid) || unavailableFunctionOids.has(dep.ref_oid)))
       );
       if (hit) {
         diverted.add(view.oid);
+        ctx.state.divertedRelations.add(view.oid);
         ctx.state.footerDiverted.push(
           `view depending on excluded objects (not emitted): ${view.qualified_raw}`
         );
@@ -1324,24 +1412,28 @@ export const generateBaselineSql = async (options: DbPullOptions): Promise<strin
       );
       return false;
     });
-    const viewStageFunctionOids = new Set(
-      activeFunctions.filter((fn) => fn.stage === 'view').map((fn) => fn.oid)
+    const excludedFunctionOids = new Set(
+      functions.filter((fn) => fn.excluded).map((fn) => fn.oid)
     );
+    const unavailableFunctionOids = new Set([
+      ...excludedFunctionOids,
+      ...activeFunctions.filter((fn) => fn.stage === 'view').map((fn) => fn.oid),
+    ]);
     const sections: string[][] = [];
     sections.push(await renderSchemas(ctx));
     sections.push(await renderExtensions(ctx));
     sections.push(await renderSequences(ctx));
     sections.push(await renderTypes(ctx));
-    sections.push(renderFunctionStage(activeFunctions, 'type'));
+    sections.push(renderFunctionStage(ctx, activeFunctions, 'type'));
     sections.push(await renderTables(ctx));
     sections.push(await renderSequenceOwnership(ctx));
-    sections.push(renderFunctionStage(activeFunctions, 'table'));
-    sections.push(renderDeferredDefaults(ctx, functionStageByOid));
-    const constraintSections = await renderConstraints(ctx, functionStageByOid);
+    sections.push(renderFunctionStage(ctx, activeFunctions, 'table'));
+    sections.push(renderDeferredDefaults(ctx, functionStageByOid, excludedFunctionOids));
+    const constraintSections = await renderConstraints(ctx, functionStageByOid, excludedFunctionOids);
     sections.push(constraintSections.constraints);
     sections.push(constraintSections.foreignKeys);
-    sections.push(await renderViews(ctx, viewStageFunctionOids));
-    sections.push(renderFunctionStage(activeFunctions, 'view'));
+    sections.push(await renderViews(ctx, unavailableFunctionOids));
+    sections.push(renderFunctionStage(ctx, activeFunctions, 'view'));
     sections.push(await renderTriggers(ctx));
     sections.push(await renderIndexes(ctx));
     sections.push(await renderFooter(ctx));
