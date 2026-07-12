@@ -144,4 +144,30 @@ describe('supalite db pull CLI', () => {
     expect(repeated.code).toBe(0);
     expect(repeated.stdout).toContain('-- schemas: cli_a, cli_b');
   });
+
+  test('--format dbmate wraps stdout in up/down markers', async () => {
+    const result = await runCli(['db', 'pull', '--db-url', connectionString, '--format', 'dbmate', '--out', '-']);
+    expect(result.code).toBe(0);
+    expect(result.stdout.startsWith('-- migrate:up\n')).toBe(true);
+    expect(result.stdout).toContain('\n-- migrate:down\n-- baseline: irreversible (no-op)\n');
+  });
+
+  test('--format plain and the default keep the current unmarked output', async () => {
+    const explicit = await runCli(['db', 'pull', '--db-url', connectionString, '--format', 'plain', '--out', '-']);
+    expect(explicit.code).toBe(0);
+    expect(explicit.stdout.startsWith('-- supalite db pull baseline')).toBe(true);
+    const def = await runCli(['db', 'pull', '--db-url', connectionString, '--out', '-']);
+    expect(def.stdout.startsWith('-- supalite db pull baseline')).toBe(true);
+  });
+
+  test('invalid --format exits 1 with the exact message', async () => {
+    const result = await runCli(['db', 'pull', '--db-url', connectionString, '--format', 'xml', '--out', '-']);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('Unknown format for db pull: xml');
+  });
+
+  test('--help documents --format', async () => {
+    const help = await runCli(['db', 'pull', '--help']);
+    expect(help.stdout).toContain('--format');
+  });
 });
