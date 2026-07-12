@@ -209,6 +209,7 @@ const printDbPullUsage = (): void => {
   [--schema public] \\
   [--out supabase/migrations/<YYYYMMDDHHMMSS>_baseline.sql] \\
   [--mode baseline] \\
+  [--format plain|dbmate] \\
   [--include-extension-objects] \\
   [--no-if-not-exists]
 
@@ -216,6 +217,7 @@ Defaults:
 - schema: public (comma-separated or repeated --schema)
 - out: supabase/migrations/<UTC timestamp>_baseline.sql (use --out - to print to stdout)
 - mode: baseline (diff is planned)
+- format: plain (dbmate wraps output in -- migrate:up / -- migrate:down markers, a drop-in for dbmate and supalite migrate)
 - extension-owned objects are EXCLUDED (pg_depend deptype 'e'); pass --include-extension-objects to include them
 - idempotent DDL is ON (IF NOT EXISTS / CREATE OR REPLACE / constraint guards); pass --no-if-not-exists for plain DDL
 - replaying triggers requires PostgreSQL 14+ (CREATE OR REPLACE TRIGGER)
@@ -230,12 +232,14 @@ const parseDbPullArgs = (args: string[]) => {
     mode: string;
     includeExtensionObjects: boolean;
     noIfNotExists: boolean;
+    format: 'plain' | 'dbmate';
     help: boolean;
   } = {
     schemas: [],
     mode: 'baseline',
     includeExtensionObjects: false,
     noIfNotExists: false,
+    format: 'plain',
     help: false,
   };
 
@@ -286,6 +290,17 @@ const parseDbPullArgs = (args: string[]) => {
       result.noIfNotExists = true;
       continue;
     }
+    if (arg === '--format') {
+      const value = requireValue(arg, args[i + 1]);
+      if (value !== 'plain' && value !== 'dbmate') {
+        console.error(`Unknown format for db pull: ${value}`);
+        printDbPullUsage();
+        process.exit(1);
+      }
+      result.format = value;
+      i += 1;
+      continue;
+    }
     // A typo like --schmea would otherwise silently pull the wrong baseline.
     console.error(`Unknown option for db pull: ${arg}`);
     printDbPullUsage();
@@ -321,6 +336,7 @@ const runDbPull = async (rawArgs: string[]): Promise<void> => {
     schemas,
     includeExtensionObjects: parsed.includeExtensionObjects,
     ifNotExists: !parsed.noIfNotExists,
+    format: parsed.format,
   });
 
   if (parsed.out === '-' || parsed.out === 'stdout') {
