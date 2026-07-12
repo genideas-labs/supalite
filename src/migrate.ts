@@ -101,12 +101,14 @@ const createSchemaSql = (t: TableRef): string => `CREATE SCHEMA IF NOT EXISTS ${
 const createTableSql = (t: TableRef): string =>
   `CREATE TABLE IF NOT EXISTS ${qualifiedTable(t)} (` +
   `version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`;
-// The mark-applied insert (idempotent). The executor binds $1; previewInsertSql
-// renders the identical statement with the version literal in place of $1.
-const markAppliedInsertSql = (t: TableRef): string =>
-  `INSERT INTO ${qualifiedTable(t)} (version) VALUES ($1) ON CONFLICT (version) DO NOTHING`;
+// The mark-applied insert (idempotent), parameterized by the value expression
+// so the executor (`$1`, bound) and the dry-run preview (a version literal)
+// render from the SAME template — structure/identifiers/ON CONFLICT can't drift.
+const markAppliedInsertSqlWith = (t: TableRef, valueExpr: string): string =>
+  `INSERT INTO ${qualifiedTable(t)} (version) VALUES (${valueExpr}) ON CONFLICT (version) DO NOTHING`;
+const markAppliedInsertSql = (t: TableRef): string => markAppliedInsertSqlWith(t, '$1');
 const previewInsertSql = (t: TableRef, version: string): string =>
-  markAppliedInsertSql(t).replace('$1', quoteLiteral(version));
+  markAppliedInsertSqlWith(t, quoteLiteral(version));
 
 const ensureMigrationsTable = async (client: Client, t: TableRef): Promise<void> => {
   await client.query(createSchemaSql(t));
