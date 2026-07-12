@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `supalite migrate mark-applied --dry-run` (#14): preview a prod adoption before the first write. Probes the tracking table **read-only** (`to_regclass`) and prints the exact versions it would record and the exact SQL it would execute — **writing nothing** (it does not create `schema_migrations` even when absent); already-recorded versions are reported as "already recorded (skip)". The preview SQL is generated from the same builders the executor uses, so preview and execution cannot drift. Exposed programmatically via `migrateMarkApplied({ dryRun: true })` → `result.dryRun` (`{ table, tableExists, sql }`); new `MarkAppliedDryRun` export.
+
+### Fixed
+- `migrate up --dry-run` is now **write-free** and prints each pending migration's file path. It previously called `ensureMigrationsTable`, creating the tracking table during a dry-run — violating 003 SC-005 ("up --dry-run … creates nothing"). It now uses the same read-only probe. `migrateUp` dry-run results gain `pendingPaths`.
+
+### Tests
+- `migrate mark-applied --dry-run` integration: table-absent preview (write-free), subset already-recorded (no INSERT for skipped, rows unchanged), fidelity (real run records exactly what dry-run predicted), single-version; `up --dry-run` no longer creates the tracking table. CLI: `mark-applied --all --dry-run` preview block, arg-parity, `up --dry-run` path + write-free note.
+
+### Compatibility
+- Backward-compatible: `--dry-run` is additive on `mark-applied`; result-shape additions are optional. The one behavior change (`up --dry-run` no longer creating the tracking table) is a bugfix toward 003 SC-005.
+
 ## [0.11.0] - 2026-07-12
 
 ### Added

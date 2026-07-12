@@ -96,8 +96,20 @@ supalite migrate new add_orders_table                            # scaffold supa
 supalite migrate up      --db-url "$DB_CONNECTION"               # apply pending, in timestamp order
 supalite migrate status  --db-url "$DB_CONNECTION"               # list applied/pending
 supalite migrate mark-applied --all --db-url "$DB_CONNECTION"    # adopt an existing DB (record without running)
+supalite migrate mark-applied --all --dry-run --db-url "$DB_CONNECTION"  # preview the adoption write — writes nothing
 ```
 
+- **Adopt-safely preview (`--dry-run`)**: `mark-applied` is the first production write when you adopt an existing DB, so `--dry-run` lets you approve it first. It probes the tracking table **read-only** and prints the exact versions it would record and the exact SQL it would run — **without writing anything** (not even `schema_migrations`). `up --dry-run` is likewise write-free and lists each pending migration with its file path.
+  ```
+  [dry-run] would ensure table: public.schema_migrations (create if absent)
+  [dry-run] would record 1 version(s):
+    - 20260712000000
+  [dry-run] SQL:
+    CREATE SCHEMA IF NOT EXISTS "public";
+    CREATE TABLE IF NOT EXISTS "public"."schema_migrations" (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());
+    INSERT INTO "public"."schema_migrations" (version) VALUES ('20260712000000') ON CONFLICT (version) DO NOTHING;
+  [dry-run] no migration DDL is executed by mark-applied.
+  ```
 - **Migration format** is dbmate-compatible: `-- migrate:up` / `-- migrate:down` sections in `<YYYYMMDDHHMMSS>_<name>.sql`. A `db pull --format dbmate` baseline is a drop-in input.
 - **Tracking table** `public.schema_migrations(version, applied_at)` is created automatically (override with `--migrations-table`). Inserts write only `version`, so an existing dbmate table is compatible.
 - **Payment-DB safety**: the whole `up` run holds a Postgres **advisory lock** (concurrent deploys can't double-apply); each migration's DDL and its version row commit in **one transaction** (a failure rolls back, is not recorded, and stops the run at the first failure).

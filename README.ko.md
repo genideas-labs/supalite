@@ -95,8 +95,20 @@ supalite migrate new add_orders_table                            # supabase/migr
 supalite migrate up      --db-url "$DB_CONNECTION"               # 미적용분을 타임스탬프 순으로 적용
 supalite migrate status  --db-url "$DB_CONNECTION"               # 적용/미적용 목록
 supalite migrate mark-applied --all --db-url "$DB_CONNECTION"    # 기존 DB 채택(실행 없이 기록)
+supalite migrate mark-applied --all --dry-run --db-url "$DB_CONNECTION"  # 채택 쓰기 미리보기 — 아무것도 안 씀
 ```
 
+- **채택 전 안전 미리보기(`--dry-run`)**: 기존 DB를 채택할 때 `mark-applied`가 **첫 프로덕션 쓰기**이므로, `--dry-run`으로 먼저 승인할 수 있습니다. 추적 테이블을 **read-only**로 확인하고, 기록될 버전과 실제 실행될 SQL을 **아무것도 쓰지 않고**(심지어 `schema_migrations`도 만들지 않음) 출력합니다. `up --dry-run`도 마찬가지로 write-free이며 미적용 마이그레이션을 파일 경로와 함께 보여줍니다.
+  ```
+  [dry-run] would ensure table: public.schema_migrations (create if absent)
+  [dry-run] would record 1 version(s):
+    - 20260712000000
+  [dry-run] SQL:
+    CREATE SCHEMA IF NOT EXISTS "public";
+    CREATE TABLE IF NOT EXISTS "public"."schema_migrations" (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());
+    INSERT INTO "public"."schema_migrations" (version) VALUES ('20260712000000') ON CONFLICT (version) DO NOTHING;
+  [dry-run] no migration DDL is executed by mark-applied.
+  ```
 - **마이그레이션 포맷**은 dbmate 호환: `<YYYYMMDDHHMMSS>_<name>.sql`의 `-- migrate:up` / `-- migrate:down` 섹션. `db pull --format dbmate` 베이스라인이 그대로 입력으로 드롭인됩니다.
 - **추적 테이블** `public.schema_migrations(version, applied_at)` 자동 생성(`--migrations-table`로 재정의). insert는 `version`만 쓰므로 기존 dbmate 테이블과 호환.
 - **결제 DB 안전**: `up` 전체가 Postgres **advisory lock**을 잡아(동시 배포 이중 적용 차단), 각 마이그레이션의 DDL과 버전 기록이 **한 트랜잭션**으로 커밋됩니다(실패 시 롤백·미기록·즉시 중단).
