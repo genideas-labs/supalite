@@ -73,6 +73,8 @@ Bring an existing database (e.g. after leaving the Supabase platform for Cloud S
 ```bash
 supalite db pull --db-url "$DB_CONNECTION" --schema public
 # writes supabase/migrations/<UTC timestamp>_baseline.sql (use --out - for stdout)
+supalite db pull --db-url "$DB_CONNECTION" --format dbmate
+# same, wrapped in -- migrate:up / -- migrate:down (dbmate & supalite migrate drop-in)
 ```
 
 - **Dependency-ordered output**: schemas → extensions → sequences → types (enums/domains/composites, topologically sorted) → type-stage functions → tables → sequence ownership → table-dependent functions → deferred column defaults → constraints → foreign keys (always after all tables) → views → view-dependent functions → triggers → indexes → footer notes.
@@ -80,7 +82,8 @@ supalite db pull --db-url "$DB_CONNECTION" --schema public
 - **Extension-owned objects are excluded by default** (`pg_depend`), so e.g. `pg_trgm`'s 30+ functions are not dumped individually — `CREATE EXTENSION IF NOT EXISTS` covers them. Pass `--include-extension-objects` to include them.
 - **Nothing is silently dropped**: v1 unsupported objects (partitioned table hierarchies, aggregate/window functions, RLS policies) and anything depending on them are listed in a footer comment instead of emitting failing DDL; dependencies on objects outside the selected schemas are disclosed there too. Grants are omitted in v1 (not enumerated).
 - Replaying the file requires PostgreSQL 14+ on the target (`CREATE OR REPLACE TRIGGER`). `--mode diff` is reserved for a future release.
-- Programmatic API: `import { generateBaselineSql } from 'supalite'`.
+- **dbmate / `supalite migrate` drop-in**: `--format dbmate` wraps the baseline in `-- migrate:up` / `-- migrate:down` markers so `dbmate up` (or the upcoming `supalite migrate up`) applies it with zero manual edits; `--format plain` (default) is unchanged. db pull emits only transaction-safe DDL (all `IF NOT EXISTS`), so the default transactional `-- migrate:up` is correct and atomic — if it ever emits non-transactional DDL, that file must switch to `-- migrate:up transaction:false`.
+- Programmatic API: `import { generateBaselineSql } from 'supalite'` (pass `{ format: 'dbmate' }` for the wrapped output).
 
 ## SupaLite vs Prisma / Drizzle
 
