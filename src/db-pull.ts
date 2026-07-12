@@ -647,6 +647,8 @@ const renderTables = async (ctx: Ctx, generatedFnBlocked: (oid: string) => boole
     identity_cycle: boolean | null;
     identity_min: string | null;
     identity_max: string | null;
+    type_schema_raw: string;
+    type_qualified: string;
   };
 
   const columnsByTable = new Map<string, ColumnRow[]>();
@@ -704,9 +706,12 @@ const renderTables = async (ctx: Ctx, generatedFnBlocked: (oid: string) => boole
               iseq.cache AS identity_cache,
               iseq.cycle AS identity_cycle,
               iseq.min AS identity_min,
-              iseq.max AS identity_max
+              iseq.max AS identity_max,
+              typ_ns.nspname AS type_schema_raw,
+              format('%I.%I', typ_ns.nspname, typ.typname) AS type_qualified
        FROM pg_attribute a
        JOIN pg_type typ ON typ.oid = a.atttypid
+       JOIN pg_namespace typ_ns ON typ_ns.oid = typ.typnamespace
        LEFT JOIN pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
        LEFT JOIN pg_collation col ON col.oid = a.attcollation
        LEFT JOIN pg_namespace coll_ns ON coll_ns.oid = col.collnamespace
@@ -785,8 +790,19 @@ const renderTables = async (ctx: Ctx, generatedFnBlocked: (oid: string) => boole
     });
   });
 
+  const externalTypeSeen = new Set<string>();
   const statements = topoSort(emittedTables, (table) => table.oid, edges).map((table) => {
     const columnLines = (columnsByTable.get(table.oid) ?? []).map((col) => {
+      if (
+        !ctx.schemas.includes(col.type_schema_raw) &&
+        !['pg_catalog', 'information_schema'].includes(col.type_schema_raw)
+      ) {
+        const key = `${table.qualified_raw}->${col.type_qualified}`;
+        if (!externalTypeSeen.has(key)) {
+          externalTypeSeen.add(key);
+          ctx.state.externalRefs.push(`${table.qualified_raw}.${col.name} -> type ${col.type_qualified}`);
+        }
+      }
       const parts = [`${col.name} ${col.data_type}`];
       if (col.collation_differs && col.collation_qualified) {
         parts.push(`COLLATE ${col.collation_qualified}`);
@@ -1391,19 +1407,35 @@ const renderViews = async (ctx: Ctx, functionUnavailable: (oid: string) => boole
     return [];
   }
 
-  const { rows: deps } = await ctx.client.query<{ view_oid: string; ref_oid: string; ref_class: string }>(
+  const { rows: deps } = await ctx.client.query<{
+    view_oid: string;
+    ref_oid: string;
+    ref_class: string;
+    ref_schema_raw: string | null;
+    ref_qualified: string | null;
+  }>(
     `SELECT DISTINCT r.ev_class::text AS view_oid,
             d.refobjid::text AS ref_oid,
-            d.refclassid::regclass::text AS ref_class
+            d.refclassid::regclass::text AS ref_class,
+            COALESCE(rcn.nspname, rpn.nspname) AS ref_schema_raw,
+            CASE
+              WHEN rc.oid IS NOT NULL THEN format('%I.%I', rcn.nspname, rc.relname)
+              WHEN rp.oid IS NOT NULL THEN format('%I.%I', rpn.nspname, rp.proname)
+            END AS ref_qualified
      FROM pg_depend d
      JOIN pg_rewrite r ON r.oid = d.objid
+     LEFT JOIN pg_class rc ON d.refclassid = 'pg_class'::regclass AND rc.oid = d.refobjid
+     LEFT JOIN pg_namespace rcn ON rcn.oid = rc.relnamespace
+     LEFT JOIN pg_proc rp ON d.refclassid = 'pg_proc'::regclass AND rp.oid = d.refobjid
+     LEFT JOIN pg_namespace rpn ON rpn.oid = rp.pronamespace
      WHERE d.classid = 'pg_rewrite'::regclass
        AND d.refclassid IN ('pg_class'::regclass, 'pg_proc'::regclass, 'pg_type'::regclass)
        AND r.ev_class <> d.refobjid`
   );
 
   const viewOids = new Set(views.map((view) => view.oid));
-  const depsByView = new Map<string, Array<{ ref_oid: string; ref_class: string }>>();
+  type ViewDep = { ref_oid: string; ref_class: string; ref_schema_raw: string | null; ref_qualified: string | null };
+  const depsByView = new Map<string, ViewDep[]>();
   deps.forEach((dep) => {
     if (viewOids.has(dep.view_oid)) {
       depsByView.set(dep.view_oid, [...(depsByView.get(dep.view_oid) ?? []), dep]);
@@ -1450,6 +1482,26 @@ const renderViews = async (ctx: Ctx, functionUnavailable: (oid: string) => boole
     (depsByView.get(view.oid) ?? []).forEach((dep) => {
       if (dep.ref_class === 'pg_class' && viewOids.has(dep.ref_oid) && !diverted.has(dep.ref_oid)) {
         edges.push([dep.ref_oid, view.oid]);
+      }
+    });
+  });
+
+  // Disclose dependencies of emitted views on objects outside the selection
+  // (they must pre-exist on an otherwise-empty target, like external FKs).
+  const externalSeen = new Set<string>();
+  emitted.forEach((view) => {
+    (depsByView.get(view.oid) ?? []).forEach((dep) => {
+      if (
+        dep.ref_schema_raw &&
+        dep.ref_qualified &&
+        !ctx.schemas.includes(dep.ref_schema_raw) &&
+        !['pg_catalog', 'information_schema'].includes(dep.ref_schema_raw)
+      ) {
+        const key = `${view.oid}->${dep.ref_qualified}`;
+        if (!externalSeen.has(key)) {
+          externalSeen.add(key);
+          ctx.state.externalRefs.push(`${view.qualified_raw} -> ${dep.ref_qualified}`);
+        }
       }
     });
   });
@@ -1597,6 +1649,15 @@ const renderFooter = async (ctx: Ctx): Promise<string[]> => {
      ORDER BY 1`,
     [ctx.schemas]
   );
+  const { rows: policies } = await ctx.client.query<{ table_q: string; polname: string }>(
+    `SELECT format('%I.%I', n.nspname, c.relname) AS table_q, pol.polname
+     FROM pg_policy pol
+     JOIN pg_class c ON c.oid = pol.polrelid
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = ANY($1)
+     ORDER BY 1, pol.polname`,
+    [ctx.schemas]
+  );
   const lines: string[] = [];
   const unsupported = [
     ...partitions.map(
@@ -1604,6 +1665,7 @@ const renderFooter = async (ctx: Ctx): Promise<string[]> => {
         `partitioned table hierarchy: ${row.parent}${row.leaves.length > 0 ? ` (leaves: ${row.leaves.join(', ')})` : ''}`
     ),
     ...aggregates.map((row) => `aggregate/window function: ${row.qualified}`),
+    ...policies.map((row) => `RLS policy (not emitted): ${row.table_q}.${row.polname}`),
     ...variants
       .filter((row) => row.variants.length > 0)
       .map((row) => `table variant not reproduced (${row.variants.join(', ')}): ${row.qualified}`),

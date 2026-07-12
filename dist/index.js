@@ -14,10 +14,12 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.default = void 0;
+exports.generateBaselineSql = exports.default = void 0;
 __exportStar(require("./client"), exports);
 __exportStar(require("./types"), exports);
 __exportStar(require("./errors"), exports);
 __exportStar(require("./postgres-client"), exports);
 var client_1 = require("./client");
 Object.defineProperty(exports, "default", { enumerable: true, get: function () { return client_1.SupaliteClient; } });
+var db_pull_1 = require("./db-pull");
+Object.defineProperty(exports, "generateBaselineSql", { enumerable: true, get: function () { return db_pull_1.generateBaselineSql; } });

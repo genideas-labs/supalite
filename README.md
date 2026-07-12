@@ -78,7 +78,7 @@ supalite db pull --db-url "$DB_CONNECTION" --schema public
 - **Dependency-ordered output**: schemas → extensions → sequences → types (enums/domains/composites, topologically sorted) → type-stage functions → tables → sequence ownership → table-dependent functions → deferred column defaults → constraints → foreign keys (always after all tables) → views → view-dependent functions → triggers → indexes → footer notes.
 - **Idempotent by default**: `IF NOT EXISTS` / `CREATE OR REPLACE`, and constraints are wrapped in `DO` guards — re-applying the file to the database it was pulled from is a no-op, constraints included (assumes the executing role owns the objects). Pass `--no-if-not-exists` for plain DDL.
 - **Extension-owned objects are excluded by default** (`pg_depend`), so e.g. `pg_trgm`'s 30+ functions are not dumped individually — `CREATE EXTENSION IF NOT EXISTS` covers them. Pass `--include-extension-objects` to include them.
-- **Nothing is silently dropped**: v1 unsupported objects (partitioned table hierarchies, aggregate/window functions, grants/RLS policies) and anything depending on them are listed in a footer comment instead of emitting failing DDL.
+- **Nothing is silently dropped**: v1 unsupported objects (partitioned table hierarchies, aggregate/window functions, RLS policies) and anything depending on them are listed in a footer comment instead of emitting failing DDL; dependencies on objects outside the selected schemas are disclosed there too. Grants are omitted in v1 (not enumerated).
 - Replaying the file requires PostgreSQL 14+ on the target (`CREATE OR REPLACE TRIGGER`). `--mode diff` is reserved for a future release.
 - Programmatic API: `import { generateBaselineSql } from 'supalite'`.
 

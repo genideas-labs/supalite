@@ -121,6 +121,15 @@ describe('supalite db pull CLI', () => {
     expect(result.stderr.trim().length).toBeGreaterThan(0);
   });
 
+  test('unknown flags and missing values are rejected', async () => {
+    const typo = await runCli(['db', 'pull', '--db-url', connectionString, '--schmea', 'analytics']);
+    expect(typo.code).toBe(1);
+    expect(typo.stderr).toContain('Unknown option for db pull: --schmea');
+    const missing = await runCli(['db', 'pull', '--db-url', connectionString, '--schema', '--out', '-']);
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain('Missing value for --schema.');
+  });
+
   test('--schema accepts comma-separated values and repeated flags', async () => {
     const comma = await runCli(
       ['db', 'pull', '--db-url', connectionString, '--schema', 'cli_a,cli_b', '--out', '-'],

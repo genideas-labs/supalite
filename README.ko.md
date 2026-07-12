@@ -77,7 +77,7 @@ supalite db pull --db-url "$DB_CONNECTION" --schema public
 - **의존성 순서 출력**: schemas → extensions → sequences → types(enum/domain/composite topo 정렬) → 타입 단계 함수 → tables → 시퀀스 소유권 → 테이블 의존 함수 → 유예된 컬럼 기본값 → constraints → FK(항상 전체 테이블 뒤) → views → 뷰 의존 함수 → triggers → indexes → footer 주석.
 - **기본 멱등**: `IF NOT EXISTS` / `CREATE OR REPLACE`, 제약은 `DO` 가드로 래핑 — 뽑아낸 원본 DB에 재적용해도 제약 포함 no-op(실행 롤이 객체 소유자일 것). 순수 DDL은 `--no-if-not-exists`.
 - **확장 소속 객체 기본 제외** (`pg_depend`) — 예: `pg_trgm`의 30여 개 함수는 개별 덤프하지 않고 `CREATE EXTENSION IF NOT EXISTS`가 대신합니다. 포함하려면 `--include-extension-objects`.
-- **무단 누락 없음**: v1 미지원(파티션 테이블 계층, aggregate/window 함수, grants/RLS)과 그 의존물은 실패할 DDL 대신 footer 주석에 목록화됩니다.
+- **무단 누락 없음**: v1 미지원(파티션 테이블 계층, aggregate/window 함수, RLS 정책)과 그 의존물은 실패할 DDL 대신 footer 주석에 목록화되며, 선택 스키마 밖 객체 의존도 함께 공시됩니다. grants는 v1에서 생략됩니다(열거 없음).
 - 재적용 대상은 PostgreSQL 14+ 필요(`CREATE OR REPLACE TRIGGER`). `--mode diff`는 추후 릴리스 예정.
 - 프로그래밍 API: `import { generateBaselineSql } from 'supalite'`.
 

@@ -1,9 +1,12 @@
 # Changelog
 
-## [Unreleased]
+## [0.10.0] - 2026-07-12
 
 ### Added
-- `supalite db pull` (#4): introspect an existing Postgres (`--db-url`) and generate a dependency-ordered baseline migration SQL. Idempotent DDL by default (`IF NOT EXISTS` / `CREATE OR REPLACE` / `DO` guards for constraints and constraint triggers — re-applying to the source database is a no-op); extension-owned objects excluded by default (`--include-extension-objects` to include); `--no-if-not-exists` for plain DDL; `--out -` for stdout; default output `supabase/migrations/<UTC ts>_baseline.sql`. Covers schemas, extensions (dependency-ordered), sequences (identity + serial + standalone), enum/domain/composite types (topologically sorted), tables (identity/generated columns, COLLATE, UNLOGGED, row-type topo), constraints (PK/UNIQUE/CHECK/EXCLUDE, FKs after all tables), functions/procedures in three dependency stages, views (options, `WITH NO DATA`, topo), triggers (incl. constraint triggers), and indexes (incl. materialized-view indexes). Unsupported objects (partitioned hierarchies, aggregates, grants/RLS) and their dependents are footer-listed, never silently dropped. Programmatic API: `generateBaselineSql` exported from the package root. Replay target requires PostgreSQL 14+.
+- `supalite db pull` (#4): introspect an existing Postgres (`--db-url`) and generate a dependency-ordered baseline migration SQL. Idempotent DDL by default (`IF NOT EXISTS` / `CREATE OR REPLACE` / `DO` guards for constraints and constraint triggers — re-applying to the source database is a no-op); extension-owned objects excluded by default (`--include-extension-objects` to include); `--no-if-not-exists` for plain DDL; `--out -` for stdout; default output `supabase/migrations/<UTC ts>_baseline.sql`. Covers schemas, extensions (dependency-ordered), sequences (identity + serial + standalone), enum/domain/composite types (topologically sorted), tables (identity/generated columns, COLLATE, UNLOGGED, row-type topo), constraints (PK/UNIQUE/CHECK/EXCLUDE, FKs after all tables), functions/procedures in three dependency stages, views (options, `WITH NO DATA`, topo), triggers (incl. constraint triggers), and indexes (incl. materialized-view indexes). Unsupported objects (partitioned hierarchies, aggregates, RLS policies) and their dependents are footer-listed — never silently dropped — along with dependencies on objects outside the selected schemas; grants are omitted in v1. Programmatic API: `generateBaselineSql` exported from the package root. Replay target requires PostgreSQL 14+.
+
+### Tests
+- `db pull` suite: 29 tests incl. live round-trip (generate → drop → apply → regenerate identical) and idempotent double-apply on PostgreSQL 14; `db-pull.ts` coverage 92% statements; `errors.ts` unit tests added (100%).
 
 ## [0.9.0] - 2026-06-08
 

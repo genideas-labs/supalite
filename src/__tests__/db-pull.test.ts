@@ -223,6 +223,9 @@ describe('generateBaselineSql', () => {
     expect(baseline).toContain('foreign key to excluded relation (not emitted): db_pull_schema.events_ref.events_ref_event_fkey');
     expect(baseline).toContain('-- references outside the selected schemas');
     expect(baseline).toContain('db_pull_ext.ext_ref');
+    expect(baseline).toContain('-> type db_pull_ext.ext_status');
+    expect(baseline).toContain('db_pull_schema.ext_view -> db_pull_ext.ext_ref');
+    expect(baseline).toContain('RLS policy (not emitted): db_pull_schema.customers.customers_self');
   });
 
   test('full section banner order', () => {

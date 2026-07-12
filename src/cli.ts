@@ -239,6 +239,15 @@ const parseDbPullArgs = (args: string[]) => {
     help: false,
   };
 
+  const requireValue = (flag: string, value: string | undefined): string => {
+    if (value === undefined || value.startsWith('--')) {
+      console.error(`Missing value for ${flag}.`);
+      printDbPullUsage();
+      process.exit(1);
+    }
+    return value;
+  };
+
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
     if (arg === '--help' || arg === '-h') {
@@ -246,27 +255,26 @@ const parseDbPullArgs = (args: string[]) => {
       return result;
     }
     if (arg === '--db-url') {
-      result.dbUrl = args[i + 1];
+      result.dbUrl = requireValue(arg, args[i + 1]);
       i += 1;
       continue;
     }
     if (arg === '--schema' || arg === '--schemas') {
-      const value = args[i + 1] ?? '';
-      i += 1;
-      value
+      requireValue(arg, args[i + 1])
         .split(',')
         .map((entry) => entry.trim())
         .filter(Boolean)
         .forEach((schema) => result.schemas.push(schema));
+      i += 1;
       continue;
     }
     if (arg === '--out') {
-      result.out = args[i + 1];
+      result.out = requireValue(arg, args[i + 1]);
       i += 1;
       continue;
     }
     if (arg === '--mode') {
-      result.mode = args[i + 1] ?? '';
+      result.mode = requireValue(arg, args[i + 1]);
       i += 1;
       continue;
     }
@@ -278,6 +286,10 @@ const parseDbPullArgs = (args: string[]) => {
       result.noIfNotExists = true;
       continue;
     }
+    // A typo like --schmea would otherwise silently pull the wrong baseline.
+    console.error(`Unknown option for db pull: ${arg}`);
+    printDbPullUsage();
+    process.exit(1);
   }
 
   return result;
@@ -316,7 +328,7 @@ const runDbPull = async (rawArgs: string[]): Promise<void> => {
     return;
   }
   const outPath = path.resolve(
-    parsed.out ?? path.join('supabase', 'migrations', `${utcTimestamp()}_baseline.sql`)
+    parsed.out !== undefined ? parsed.out : path.join('supabase', 'migrations', `${utcTimestamp()}_baseline.sql`)
   );
   await fs.mkdir(path.dirname(outPath), { recursive: true });
   await fs.writeFile(outPath, sql, 'utf8');

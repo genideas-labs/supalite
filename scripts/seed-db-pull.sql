@@ -3,8 +3,9 @@ DROP SCHEMA IF EXISTS db_pull_ext CASCADE;
 CREATE SCHEMA db_pull_schema;
 CREATE SCHEMA db_pull_ext;
 
--- external prerequisite (outside the pulled selection)
+-- external prerequisites (outside the pulled selection)
 CREATE TABLE db_pull_ext.ext_ref (id bigint PRIMARY KEY);
+CREATE TYPE db_pull_ext.ext_status AS ENUM ('a', 'b');
 
 -- types
 CREATE TYPE db_pull_schema.order_status AS ENUM ('pending', 'paid', 'cancelled');
@@ -90,8 +91,10 @@ DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION db_pull_schema.touch
 
 CREATE TABLE db_pull_schema.snapshots (
   snap db_pull_schema.customers,
+  est db_pull_ext.ext_status,
   taken_at timestamptz DEFAULT now()
 );
+CREATE VIEW db_pull_schema.ext_view AS SELECT id FROM db_pull_ext.ext_ref;
 
 CREATE TABLE db_pull_schema."CamelTable" (
   "order" text,
