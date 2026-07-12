@@ -13,6 +13,7 @@ type DeferredDomainConstraint = {
   nameRaw: string;
   definition: string;
   functionOids: string[];
+  typeOids: string[];
   ownerTypeOid: string;
 };
 
@@ -387,6 +388,7 @@ const renderTypes = async (ctx: Ctx): Promise<string[]> => {
     default_expr: string | null;
     default_uses_function: boolean;
     default_function_oids: string[] | null;
+    default_type_oids: string[] | null;
   }>(
     `SELECT t.oid::text AS oid,
             quote_ident(n.nspname) AS schema,
@@ -404,7 +406,15 @@ const renderTypes = async (ctx: Ctx): Promise<string[]> => {
              WHERE fdep.classid = 'pg_type'::regclass
                AND fdep.objid = t.oid
                AND fdep.refclassid = 'pg_proc'::regclass
-               AND fns.nspname NOT IN ('pg_catalog', 'information_schema')) AS default_function_oids
+               AND fns.nspname NOT IN ('pg_catalog', 'information_schema')) AS default_function_oids,
+            (SELECT array_agg(tdep.refobjid::text)
+             FROM pg_depend tdep
+             JOIN pg_type tt ON tt.oid = tdep.refobjid
+             JOIN pg_namespace tns ON tns.oid = tt.typnamespace
+             WHERE tdep.classid = 'pg_type'::regclass
+               AND tdep.objid = t.oid
+               AND tdep.refclassid = 'pg_type'::regclass
+               AND tns.nspname NOT IN ('pg_catalog', 'information_schema')) AS default_type_oids
      FROM pg_type t
      JOIN pg_namespace n ON n.oid = t.typnamespace
      WHERE t.typtype = 'd'
@@ -421,6 +431,7 @@ const renderTypes = async (ctx: Ctx): Promise<string[]> => {
     definition: string;
     uses_function: boolean;
     function_oids: string[] | null;
+    type_oids: string[] | null;
   }>(
     `SELECT con.contypid::text AS type_oid,
             quote_ident(con.conname) AS name_quoted,
@@ -434,7 +445,15 @@ const renderTypes = async (ctx: Ctx): Promise<string[]> => {
              WHERE fdep.classid = 'pg_constraint'::regclass
                AND fdep.objid = con.oid
                AND fdep.refclassid = 'pg_proc'::regclass
-               AND fns.nspname NOT IN ('pg_catalog', 'information_schema')) AS function_oids
+               AND fns.nspname NOT IN ('pg_catalog', 'information_schema')) AS function_oids,
+            (SELECT array_agg(tdep.refobjid::text)
+             FROM pg_depend tdep
+             JOIN pg_type tt ON tt.oid = tdep.refobjid
+             JOIN pg_namespace tns ON tns.oid = tt.typnamespace
+             WHERE tdep.classid = 'pg_constraint'::regclass
+               AND tdep.objid = con.oid
+               AND tdep.refclassid = 'pg_type'::regclass
+               AND tns.nspname NOT IN ('pg_catalog', 'information_schema')) AS type_oids
      FROM pg_constraint con
      JOIN pg_type t ON t.oid = con.contypid
      JOIN pg_namespace n ON n.oid = t.typnamespace
@@ -520,6 +539,7 @@ const renderTypes = async (ctx: Ctx): Promise<string[]> => {
           nameRaw: con.name_raw,
           definition: con.definition,
           functionOids: con.function_oids ?? [],
+          typeOids: con.type_oids ?? [],
           ownerTypeOid: row.oid,
         });
       } else {
@@ -530,7 +550,7 @@ const renderTypes = async (ctx: Ctx): Promise<string[]> => {
       ctx.state.deferredDomainDefaults.push({
         statement: `ALTER DOMAIN ${row.schema}.${row.name} SET DEFAULT ${row.default_expr};`,
         functionOids: row.default_function_oids ?? [],
-        typeOids: [],
+        typeOids: row.default_type_oids ?? [],
         ownerTypeOid: row.oid,
         label: row.qualified_raw,
       });
@@ -978,10 +998,10 @@ const renderConstraints = async (
     [ctx.schemas]
   );
 
-  const typeUnavailable = await createTypeAvailability(
-    ctx,
-    rows.flatMap((row) => row.type_oids ?? [])
-  );
+  const typeUnavailable = await createTypeAvailability(ctx, [
+    ...rows.flatMap((row) => row.type_oids ?? []),
+    ...ctx.state.deferredDomainConstraints.flatMap((domainCon) => domainCon.typeOids),
+  ]);
 
   const guard = (alter: string, innerCheck: string): string => {
     const inner = `IF NOT EXISTS (\n    ${innerCheck}\n  ) THEN\n    ${alter}\n  END IF;`;
@@ -1038,6 +1058,12 @@ const renderConstraints = async (
   ctx.state.deferredDomainConstraints.forEach((domainCon) => {
     if (ctx.state.divertedTypes.has(domainCon.ownerTypeOid)) {
       return; // owner domain itself was diverted (already footer-listed)
+    }
+    if (domainCon.typeOids.some(typeUnavailable)) {
+      ctx.state.footerDiverted.push(
+        `domain constraint referencing an unavailable type (not emitted): ${domainCon.qualifiedRaw}.${domainCon.nameRaw}`
+      );
+      return;
     }
     if (domainCon.functionOids.some(functionUnavailable)) {
       ctx.state.footerDiverted.push(
