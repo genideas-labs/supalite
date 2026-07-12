@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.12.0] - 2026-07-12
 
 ### Added
 - `supalite migrate mark-applied --dry-run` (#14): preview a prod adoption before the first write. Probes the tracking table **read-only** (`to_regclass`) and prints the exact versions it would record and the exact SQL it would execute — **writing nothing** (it does not create `schema_migrations` even when absent); already-recorded versions are reported as "already recorded (skip)". The preview SQL is generated from the same builders the executor uses, so preview and execution cannot drift. Exposed programmatically via `migrateMarkApplied({ dryRun: true })` → `result.dryRun` (`{ table, tableExists, sql }`); new `MarkAppliedDryRun` export.
@@ -10,6 +10,7 @@
 
 ### Tests
 - `migrate mark-applied --dry-run` integration: table-absent preview (write-free), subset already-recorded (no INSERT for skipped, rows unchanged), fidelity (real run records exactly what dry-run predicted), single-version; `up --dry-run` no longer creates the tracking table. CLI: `mark-applied --all --dry-run` preview block, arg-parity, `up --dry-run` path + write-free note.
+- `npm test` now runs with `--maxWorkers=50%` to avoid an intermittent spawn/DB-contention flake in the ts-node CLI tests under full parallelism (the `prepublishOnly` gate was flaking on unrelated CLI suites).
 
 ### Compatibility
 - Backward-compatible: `--dry-run` is additive on `mark-applied`; result-shape additions are optional. The one behavior change (`up --dry-run` no longer creating the tracking table) is a bugfix toward 003 SC-005.

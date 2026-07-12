@@ -22,11 +22,11 @@ Compatibility at a glance:
 - ✅ RPC (including `single`/`maybeSingle`)
 - ❌ Auth/Storage/Realtime
 
-## 0.11.0 Highlights
+## 0.12.0 Highlights
 
-- **`supalite migrate` (#7)**: a built-in migration runner — `up` / `status` / `new` / `mark-applied` — that closes the `db pull → migrate → gen types` toolchain without dbmate/Flyway. Payment-DB safe: advisory-locked `up`, atomic per-migration recording (rollback + stop on failure), and a `transaction:false` escape for `CREATE INDEX CONCURRENTLY`.
-- **`supalite db pull --format dbmate` (#8)**: emit the baseline wrapped in `-- migrate:up` / `-- migrate:down` markers — a drop-in for both dbmate and `supalite migrate`.
-- **Fix**: `gen types` `--type-case` / `--function-case` no longer drops the letter `s` from identifiers (a double-escaped `splitWords` regex).
+- **`supalite migrate mark-applied --dry-run` (#14)**: preview a prod adoption before the first write — a **write-free** probe that prints the exact versions it would record and the exact SQL it would run, without creating the tracking table. `up --dry-run` is now write-free too and lists each pending migration's file path.
+
+Earlier (0.11.0): **`supalite migrate` (#7)** — a built-in `up` / `status` / `new` / `mark-applied` runner (advisory-locked, atomic per-migration recording, `transaction:false` escape) closing the `db pull → migrate → gen types` toolchain; **`db pull --format dbmate` (#8)** wraps the baseline in `-- migrate:up` / `-- migrate:down` markers; fixed a `gen types` casing bug (`splitWords` dropped the letter `s`).
 
 Earlier (0.7.2): `gen types --format supabase` matches Supabase CLI byte-for-byte; default `--format supalite` superset (constraints/indexes, referenced schema, setof RPC options); BigInt controls `--no-bigint` / `--no-json-bigint`.
 

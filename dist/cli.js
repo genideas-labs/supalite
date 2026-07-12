@@ -370,14 +370,16 @@ Options:
   --db-url <conn>            Postgres URL (env: DB_CONNECTION, DATABASE_URL)
   --dir <path>              Migrations directory (default: supabase/migrations)
   --migrations-table <ref>  Tracking table (default: public.schema_migrations)
-  --dry-run                 (up) Print pending migrations without applying
+  --dry-run                 (up, mark-applied) Preview without writing anything
   --all                     (mark-applied) Mark every migration file as applied
 
 Examples:
   supalite migrate up --db-url "$DB_CONNECTION"
+  supalite migrate up --dry-run
   supalite migrate status
   supalite migrate new add_orders_table
   supalite migrate mark-applied --all
+  supalite migrate mark-applied --all --dry-run
 `);
 };
 const parseMigrateArgs = (args) => {
@@ -485,8 +487,12 @@ const runMigrate = async (rawArgs) => {
             }
             else {
                 console.log('Pending migrations (dry run):');
-                result.pending.forEach((v) => console.log(`  ${v}`));
+                result.pending.forEach((v, i) => {
+                    const filePath = result.pendingPaths?.[i];
+                    console.log(filePath ? `  ${v}  ${filePath}` : `  ${v}`);
+                });
             }
+            console.log('(table not created; nothing applied)');
             return;
         }
         if (result.applied.length === 0) {
@@ -503,7 +509,22 @@ const runMigrate = async (rawArgs) => {
             ...common,
             all: parsed.all,
             version: parsed.positional,
+            dryRun: parsed.dryRun,
         });
+        if (result.dryRun) {
+            const existsNote = result.dryRun.tableExists ? 'already exists' : 'create if absent';
+            console.log(`[dry-run] would ensure table: ${result.dryRun.table} (${existsNote})`);
+            console.log(`[dry-run] would record ${result.marked.length} version(s):`);
+            result.marked.forEach((v) => console.log(`  - ${v}`));
+            if (result.alreadyApplied.length > 0) {
+                console.log('[dry-run] already recorded (skip):');
+                result.alreadyApplied.forEach((v) => console.log(`  - ${v}`));
+            }
+            console.log('[dry-run] SQL:');
+            result.dryRun.sql.forEach((s) => console.log(`  ${s};`));
+            console.log('[dry-run] no migration DDL is executed by mark-applied.');
+            return;
+        }
         console.log(`Marked ${result.marked.length} migration(s) as applied.`);
         if (result.alreadyApplied.length > 0) {
             console.log(`(${result.alreadyApplied.length} already recorded.)`);

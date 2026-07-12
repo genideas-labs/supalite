@@ -38,17 +38,25 @@ export declare const migrateStatus: (opts: MigrateOptions) => Promise<MigrationS
 export type MigrateUpResult = {
     applied: string[];
     pending: string[];
+    pendingPaths?: string[];
 };
 export declare const migrateUp: (opts: MigrateOptions & {
     dryRun?: boolean;
 }) => Promise<MigrateUpResult>;
+export type MarkAppliedDryRun = {
+    table: string;
+    tableExists: boolean;
+    sql: string[];
+};
 export type MarkAppliedResult = {
     marked: string[];
     alreadyApplied: string[];
+    dryRun?: MarkAppliedDryRun;
 };
 export declare const migrateMarkApplied: (opts: MigrateOptions & {
     version?: string;
     all?: boolean;
+    dryRun?: boolean;
 }) => Promise<MarkAppliedResult>;
 export type NewMigrationResult = {
     path: string;
