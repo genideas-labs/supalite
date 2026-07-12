@@ -6,6 +6,7 @@ import { config } from 'dotenv';
 import {
   parseMigrationSql,
   parseMigrationFilename,
+  parseTableRef,
   listMigrationFiles,
   migrateStatus,
   migrateUp,
@@ -101,6 +102,28 @@ describe('parseMigrationFilename', () => {
 describe('migrationTimestamp', () => {
   test('formats a date as YYYYMMDDHHMMSS', () => {
     expect(migrationTimestamp(new Date('2026-07-12T09:30:00.000Z'))).toBe('20260712093000');
+  });
+});
+
+describe('parseTableRef', () => {
+  test('accepts table-only (defaults schema to public) and schema.table', () => {
+    expect(parseTableRef('sm')).toEqual({ schema: 'public', table: 'sm' });
+    expect(parseTableRef('audit.sm')).toEqual({ schema: 'audit', table: 'sm' });
+  });
+  test('rejects an invalid ref', () => {
+    expect(() => parseTableRef('a.b.c')).toThrow('Invalid --migrations-table');
+    expect(() => parseTableRef('')).toThrow('Invalid --migrations-table');
+  });
+});
+
+describe('migrateNew validation', () => {
+  test('throws on an empty name', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'supalite-new-empty-'));
+    try {
+      await expect(migrateNew({ name: '   ', dir })).rejects.toThrow('non-empty');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -323,6 +346,29 @@ describe('migrateMarkApplied (integration)', () => {
       await expect(
         migrateMarkApplied({ dbUrl: connectionString, dir: env.dir, migrationsTable: env.table })
       ).rejects.toThrow('requires a <version> argument or --all');
+    } finally {
+      await cleanupEnv(env);
+    }
+  });
+
+  test('throws for an unknown version and reports already-applied on repeat', async () => {
+    const env = await makeEnv();
+    try {
+      await writeMigration(env.dir, '20260301000005_a.sql', `-- migrate:up\nSELECT 1;\n`);
+      await expect(
+        migrateMarkApplied({
+          dbUrl: connectionString,
+          dir: env.dir,
+          migrationsTable: env.table,
+          version: '99999999999999',
+        })
+      ).rejects.toThrow('No migration with version 99999999999999');
+
+      const first = await migrateMarkApplied({ dbUrl: connectionString, dir: env.dir, migrationsTable: env.table, all: true });
+      expect(first.marked).toEqual(['20260301000005']);
+      const second = await migrateMarkApplied({ dbUrl: connectionString, dir: env.dir, migrationsTable: env.table, all: true });
+      expect(second.marked).toEqual([]);
+      expect(second.alreadyApplied).toEqual(['20260301000005']);
     } finally {
       await cleanupEnv(env);
     }
