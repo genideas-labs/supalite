@@ -1673,12 +1673,17 @@ export const generateBaselineSql = async (options: DbPullOptions): Promise<strin
     sections.push(await renderSequences(ctx));
     sections.push(await renderTypes(ctx));
     sections.push(renderFunctionStage(ctx, activeFunctions, 'type'));
-    // Generated expressions are fixed at CREATE TABLE: only type-stage
-    // functions already emitted (and not diverted) are usable there.
-    const generatedFnBlocked = (oid: string): boolean =>
-      excludedFunctionOids.has(oid) ||
-      functionStageByOid.get(oid) !== 'type' ||
-      ctx.state.divertedFunctions.has(oid);
+    // Generated expressions are fixed at CREATE TABLE: of the functions WE
+    // emit, only already-emitted (type-stage, not diverted) ones are usable
+    // there. Functions outside the selection (extension-owned, other
+    // schemas) are external prerequisites — same policy as external FKs.
+    const generatedFnBlocked = (oid: string): boolean => {
+      const stage = functionStageByOid.get(oid);
+      if (stage === undefined) {
+        return false;
+      }
+      return stage !== 'type' || excludedFunctionOids.has(oid) || ctx.state.divertedFunctions.has(oid);
+    };
     sections.push(await renderTables(ctx, generatedFnBlocked));
     sections.push(await renderSequenceOwnership(ctx));
     sections.push(renderFunctionStage(ctx, activeFunctions, 'table'));
