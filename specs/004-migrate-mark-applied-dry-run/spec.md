@@ -2,7 +2,7 @@
 
 **Feature Branch**: `004-migrate-mark-applied-dry-run`
 **Created**: 2026-07-12
-**Status**: Draft
+**Status**: Implemented
 **Input**: [GitHub issue #14](https://github.com/genideas-labs/supalite/issues/14) — extends `supalite migrate` ([003-migrate](../003-migrate/spec.md), #7)
 
 ## User Scenarios & Testing
