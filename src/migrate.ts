@@ -92,20 +92,45 @@ export const parseTableRef = (ref: string): TableRef => {
 };
 
 const quoteIdent = (id: string): string => `"${id.replace(/"/g, '""')}"`;
+const quoteLiteral = (v: string): string => `'${v.replace(/'/g, "''")}'`;
 const qualifiedTable = (t: TableRef): string => `${quoteIdent(t.schema)}.${quoteIdent(t.table)}`;
 
+// SQL builders shared by the executor and the dry-run preview so the two can
+// never drift (issue #14 fidelity requirement).
+const createSchemaSql = (t: TableRef): string => `CREATE SCHEMA IF NOT EXISTS ${quoteIdent(t.schema)}`;
+const createTableSql = (t: TableRef): string =>
+  `CREATE TABLE IF NOT EXISTS ${qualifiedTable(t)} (` +
+  `version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`;
+// The mark-applied insert (idempotent), parameterized by the value expression
+// so the executor (`$1`, bound) and the dry-run preview (a version literal)
+// render from the SAME template — structure/identifiers/ON CONFLICT can't drift.
+const markAppliedInsertSqlWith = (t: TableRef, valueExpr: string): string =>
+  `INSERT INTO ${qualifiedTable(t)} (version) VALUES (${valueExpr}) ON CONFLICT (version) DO NOTHING`;
+const markAppliedInsertSql = (t: TableRef): string => markAppliedInsertSqlWith(t, '$1');
+const previewInsertSql = (t: TableRef, version: string): string =>
+  markAppliedInsertSqlWith(t, quoteLiteral(version));
+
 const ensureMigrationsTable = async (client: Client, t: TableRef): Promise<void> => {
-  await client.query(`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(t.schema)}`);
-  await client.query(
-    `CREATE TABLE IF NOT EXISTS ${qualifiedTable(t)} (` +
-      `version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`
-  );
+  await client.query(createSchemaSql(t));
+  await client.query(createTableSql(t));
+};
+
+// Read-only existence probe — never creates the table (dry-run safety).
+const tableExists = async (client: Client, t: TableRef): Promise<boolean> => {
+  const res = await client.query<{ reg: string | null }>('SELECT to_regclass($1) AS reg', [
+    qualifiedTable(t),
+  ]);
+  return res.rows[0]?.reg != null;
 };
 
 const appliedVersions = async (client: Client, t: TableRef): Promise<Set<string>> => {
   const res = await client.query<{ version: string }>(`SELECT version FROM ${qualifiedTable(t)}`);
   return new Set(res.rows.map((r) => r.version));
 };
+
+// Applied versions without assuming the table exists (returns ∅ when absent).
+const appliedVersionsIfExists = async (client: Client, t: TableRef): Promise<Set<string>> =>
+  (await tableExists(client, t)) ? appliedVersions(client, t) : new Set<string>();
 
 export type MigrateOptions = {
   dbUrl: string;
@@ -140,7 +165,12 @@ export const migrateStatus = async (opts: MigrateOptions): Promise<MigrationStat
   }
 };
 
-export type MigrateUpResult = { applied: string[]; pending: string[] };
+export type MigrateUpResult = {
+  applied: string[];
+  pending: string[];
+  // dry-run only: the migration file path for each `pending` version (same order).
+  pendingPaths?: string[];
+};
 
 const applyMigration = async (
   client: Client,
@@ -189,14 +219,19 @@ export const migrateUp = async (
   const client = new Client({ connectionString: opts.dbUrl });
   await client.connect();
   try {
-    await ensureMigrationsTable(client, table);
-    const applied = await appliedVersions(client, table);
-    const pending = files.filter((f) => !applied.has(f.version));
-
     if (opts.dryRun) {
-      return { applied: [], pending: pending.map((f) => f.version) };
+      // Write-free: probe the tracking table read-only (do not create it) so a
+      // dry-run never mutates the database (issue #14; fixes 003 SC-005).
+      const applied = await appliedVersionsIfExists(client, table);
+      const pending = files.filter((f) => !applied.has(f.version));
+      return {
+        applied: [],
+        pending: pending.map((f) => f.version),
+        pendingPaths: pending.map((f) => f.path),
+      };
     }
 
+    await ensureMigrationsTable(client, table);
     await client.query(LOCK_SQL);
     const done: string[] = [];
     try {
@@ -220,10 +255,24 @@ export const migrateUp = async (
   }
 };
 
-export type MarkAppliedResult = { marked: string[]; alreadyApplied: string[] };
+export type MarkAppliedDryRun = {
+  // Human-readable tracking-table ref, e.g. "public.schema_migrations".
+  table: string;
+  // Whether the tracking table already exists (read-only probe result).
+  tableExists: boolean;
+  // The exact statements the real command would execute for these targets.
+  sql: string[];
+};
+export type MarkAppliedResult = {
+  // Versions recorded; in a dry-run these are the versions that WOULD be recorded.
+  marked: string[];
+  alreadyApplied: string[];
+  // Present only when `dryRun` was requested; the DB was left untouched.
+  dryRun?: MarkAppliedDryRun;
+};
 
 export const migrateMarkApplied = async (
-  opts: MigrateOptions & { version?: string; all?: boolean }
+  opts: MigrateOptions & { version?: string; all?: boolean; dryRun?: boolean }
 ): Promise<MarkAppliedResult> => {
   const dir = opts.dir ?? DEFAULT_DIR;
   const table = parseTableRef(opts.migrationsTable ?? DEFAULT_TABLE);
@@ -245,8 +294,33 @@ export const migrateMarkApplied = async (
   const client = new Client({ connectionString: opts.dbUrl });
   await client.connect();
   try {
+    if (opts.dryRun) {
+      // Write-free preview: probe the table read-only (never create it), then
+      // report which versions would be recorded and the exact SQL that would
+      // run — built from the same helpers the executor uses (fidelity).
+      const exists = await tableExists(client, table);
+      const applied = exists ? await appliedVersions(client, table) : new Set<string>();
+      const marked: string[] = [];
+      const alreadyApplied: string[] = [];
+      for (const file of targets) {
+        (applied.has(file.version) ? alreadyApplied : marked).push(file.version);
+      }
+      // The ensure statements always run in reality (IF NOT EXISTS), so they are
+      // always part of the preview; one insert per version that would be recorded.
+      const sql = [createSchemaSql(table), createTableSql(table)];
+      for (const version of marked) {
+        sql.push(previewInsertSql(table, version));
+      }
+      return {
+        marked,
+        alreadyApplied,
+        dryRun: { table: `${table.schema}.${table.table}`, tableExists: exists, sql },
+      };
+    }
+
     await ensureMigrationsTable(client, table);
     const applied = await appliedVersions(client, table);
+    const insert = markAppliedInsertSql(table);
     const marked: string[] = [];
     const alreadyApplied: string[] = [];
     for (const file of targets) {
@@ -254,10 +328,7 @@ export const migrateMarkApplied = async (
         alreadyApplied.push(file.version);
         continue;
       }
-      await client.query(
-        `INSERT INTO ${qualifiedTable(table)} (version) VALUES ($1) ON CONFLICT (version) DO NOTHING`,
-        [file.version]
-      );
+      await client.query(insert, [file.version]);
       marked.push(file.version);
     }
     return { marked, alreadyApplied };

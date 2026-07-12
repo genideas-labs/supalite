@@ -22,6 +22,7 @@ export type {
   MigrationStatusEntry,
   MigrateUpResult,
   MarkAppliedResult,
+  MarkAppliedDryRun,
   NewMigrationResult,
   MigrationFile,
   ParsedMigration,
