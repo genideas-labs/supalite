@@ -356,11 +356,11 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
   }
 
   /**
-   * @deprecated Manual transaction control mutates this instance and is NOT
-   * concurrency-safe. Use `transaction(cb)` instead.
+   * Internal transaction plumbing — mutates THIS instance's connection state.
+   * Only ever invoked on a fresh per-transaction scope (from `begin()` /
+   * `transaction()`), never on a shared instance, so the mutation is safe.
    */
-  // 트랜잭션 시작
-  async begin(): Promise<void> {
+  private async startTx(): Promise<void> {
     if (!this.client) {
       this.client = await this.pool.connect();
     }
@@ -378,12 +378,8 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
     }
   }
 
-  /**
-   * @deprecated Manual transaction control mutates this instance and is NOT
-   * concurrency-safe. Use `transaction(cb)` instead, which runs on an isolated scope.
-   */
-  // 트랜잭션 커밋
-  async commit(): Promise<void> {
+  /** Internal: COMMIT + release on the scope's own connection (see startTx). */
+  private async commitTx(): Promise<void> {
     if (this.isTransaction && this.client) {
       let commitError: unknown;
       try {
@@ -401,12 +397,8 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
     }
   }
 
-  /**
-   * @deprecated Manual transaction control mutates this instance and is NOT
-   * concurrency-safe. Use `transaction(cb)` instead, which runs on an isolated scope.
-   */
-  // 트랜잭션 롤백
-  async rollback(): Promise<void> {
+  /** Internal: ROLLBACK + release on the scope's own connection (see startTx). */
+  private async rollbackTx(): Promise<void> {
     if (this.isTransaction && this.client) {
       let rollbackError: unknown;
       try {
@@ -455,20 +447,68 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
     return scope;
   }
 
+  /**
+   * Begins a transaction and returns a **connection-scoped handle** — a child
+   * client bound to one connection borrowed from the shared pool. This instance
+   * is NOT mutated, so calling `begin()` on a shared singleton is concurrency-safe:
+   * run your statements on the returned handle and finalize with
+   * `handle.commit()` / `handle.rollback()`.
+   *
+   * ```ts
+   * const tx = await db.begin();
+   * try { await tx.from('t').insert(row); await tx.commit(); }
+   * catch (e) { await tx.rollback(); throw e; }
+   * ```
+   *
+   * For fully-managed transactions prefer {@link transaction} (auto commit/rollback
+   * and connection release). Nested transactions (calling `begin()` on a handle)
+   * are not supported.
+   */
+  async begin(): Promise<SupaLitePG<T>> {
+    if (this.isTransaction) {
+      throw new Error('nested transactions are not supported');
+    }
+    const tx = this.createTransactionScope();
+    await tx.startTx();
+    return tx;
+  }
+
+  /**
+   * Commits the transaction on this handle (from {@link begin}) and releases its
+   * connection. Throws if there is no active transaction.
+   */
+  async commit(): Promise<void> {
+    if (!(this.isTransaction && this.client)) {
+      throw new Error('no active transaction — call begin() to obtain a transaction handle');
+    }
+    await this.commitTx();
+  }
+
+  /**
+   * Rolls back the transaction on this handle (from {@link begin}) and releases its
+   * connection. Throws if there is no active transaction.
+   */
+  async rollback(): Promise<void> {
+    if (!(this.isTransaction && this.client)) {
+      throw new Error('no active transaction — call begin() to obtain a transaction handle');
+    }
+    await this.rollbackTx();
+  }
+
   // 트랜잭션 실행 (concurrency-safe: isolated scope per call)
   async transaction<R>(
     callback: (client: SupaLitePG<T>) => Promise<R>
   ): Promise<R> {
     const tx = this.createTransactionScope();
-    await tx.begin();
+    await tx.startTx();
     try {
       const result = await callback(tx);
-      await tx.commit();
+      await tx.commitTx();
       return result;
     } catch (error) {
       // Roll back, but never let a rollback failure mask the original error.
       try {
-        await tx.rollback();
+        await tx.rollbackTx();
       } catch (rollbackError) {
         if (this.verbose) {
           console.error('[SupaLite] rollback failed after a transaction error', rollbackError);
