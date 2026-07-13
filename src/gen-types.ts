@@ -1597,7 +1597,7 @@ let prettierPromise: Promise<typeof import('prettier')> | null = null;
 const loadPrettier = (): Promise<typeof import('prettier')> => {
   if (!prettierPromise) {
     // Prettier is ESM-only; keep a real dynamic import in the CJS output.
-    const importer = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<any>;
+    const importer = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<unknown>;
     prettierPromise = importer('prettier') as Promise<typeof import('prettier')>;
   }
   return prettierPromise;
@@ -1967,8 +1967,8 @@ export const generateTypes = async (options: GenTypesOptions): Promise<string> =
           [schemas]
         );
         indexRows = rows;
-      } catch (err: any) {
-        const message = String(err?.message ?? '');
+      } catch (err: unknown) {
+        const message = String((err as { message?: unknown })?.message ?? '');
         if (!message.includes('could not open relation')) {
           throw err;
         }

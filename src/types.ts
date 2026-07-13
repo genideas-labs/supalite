@@ -1,3 +1,12 @@
+/*
+ * The `any` in this file is deliberate: it is the dynamic surface of the typed
+ * query builder — arbitrary user table shapes (`Row`/`Insert`/`Update`), dynamic
+ * schema sections (`Views`/`Functions`/`Enums`), user-supplied filter values, and
+ * the untyped-query result defaults (`QueryResult<T = any>`). Replacing these with
+ * `unknown` would force a cast on every field access and break ergonomic use of a
+ * client instantiated without a generated schema type.
+ */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import type { Pool } from 'pg';
 import { PostgresError } from './errors';
 

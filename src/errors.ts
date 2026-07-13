@@ -1,3 +1,16 @@
+/** The subset of a node-postgres error object PostgresError reads. */
+export interface PgErrorLike {
+  code?: string;
+  detail?: string;
+  hint?: string;
+  position?: string;
+  schema?: string;
+  table?: string;
+  column?: string;
+  dataType?: string;
+  constraint?: string;
+}
+
 export class PostgresError extends Error {
   code?: string;
   details?: string;
@@ -9,7 +22,7 @@ export class PostgresError extends Error {
   dataType?: string;
   constraint?: string;
 
-  constructor(message: string, pgError?: any) {
+  constructor(message: string, pgError?: PgErrorLike) {
     super(message);
     this.name = 'PostgresError';
     if (pgError) {
