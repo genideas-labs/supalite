@@ -81,7 +81,30 @@ describe('manual transaction handle (begin/commit/rollback, scoped)', () => {
     await tx.rollback();
   });
 
-  it('returns the connection to the pool on commit, rollback, and mid-tx exception (no leak, max:1)', async () => {
+  it('concurrent commit()+rollback() on one handle: one wins, the other throws, connection not double-released', async () => {
+    const tightPool = new Pool({ connectionString, max: 1 });
+    try {
+      const tight = new SupaLitePG<any>({ pool: tightPool });
+      const tx = await tight.begin();
+      await tx.from('manual_tx_test').insert({ id: 20, label: 'race' });
+
+      // Race the two finalizers on the SAME handle. Finalization is atomic, so
+      // exactly one proceeds and the other sees no active transaction.
+      const results = await Promise.allSettled([tx.commit(), tx.rollback()]);
+      const rejected = results.filter((r) => r.status === 'rejected');
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason.message).toMatch('no active transaction');
+
+      // If the connection had been double-released, the single pooled connection
+      // would be corrupted and this query would fail or hang.
+      const { rows } = await tightPool.query('SELECT count(*)::int AS n FROM manual_tx_test;');
+      expect(typeof rows[0].n).toBe('number');
+    } finally {
+      await tightPool.end();
+    }
+  });
+
+  it('returns the connection to the pool on commit, rollback, and a caller-handled mid-tx exception (no leak, max:1)', async () => {
     const tightPool = new Pool({ connectionString, max: 1 });
     try {
       const tight = new SupaLitePG<any>({ pool: tightPool });

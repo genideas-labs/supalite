@@ -380,39 +380,47 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
 
   /** Internal: COMMIT + release on the scope's own connection (see startTx). */
   private async commitTx(): Promise<void> {
-    if (this.isTransaction && this.client) {
-      let commitError: unknown;
-      try {
-        await this.client.query('COMMIT');
-      } catch (err) {
-        commitError = err;
-        throw err;
-      } finally {
-        // On COMMIT failure the connection may be in an unknown state — pass the
-        // error to release() so pg discards it instead of reusing a broken client.
-        this.client.release(commitError as Error | undefined);
-        this.client = null;
-        this.isTransaction = false;
-      }
+    // Capture the connection and clear the transaction state SYNCHRONOUSLY, before
+    // any await, so a concurrent finalize on the same handle (e.g. commit() racing
+    // rollback()) sees no active transaction and cannot double-release the client.
+    const client = this.client;
+    if (!(this.isTransaction && client)) {
+      return;
+    }
+    this.client = null;
+    this.isTransaction = false;
+    let commitError: unknown;
+    try {
+      await client.query('COMMIT');
+    } catch (err) {
+      commitError = err;
+      throw err;
+    } finally {
+      // On COMMIT failure the connection may be in an unknown state — pass the
+      // error to release() so pg discards it instead of reusing a broken client.
+      client.release(commitError as Error | undefined);
     }
   }
 
   /** Internal: ROLLBACK + release on the scope's own connection (see startTx). */
   private async rollbackTx(): Promise<void> {
-    if (this.isTransaction && this.client) {
-      let rollbackError: unknown;
-      try {
-        await this.client.query('ROLLBACK');
-      } catch (err) {
-        rollbackError = err;
-        throw err;
-      } finally {
-        // On ROLLBACK failure the connection may be in an unknown state — pass the
-        // error to release() so pg discards it instead of reusing a broken client.
-        this.client.release(rollbackError as Error | undefined);
-        this.client = null;
-        this.isTransaction = false;
-      }
+    // Capture + clear synchronously (see commitTx) to make finalization atomic.
+    const client = this.client;
+    if (!(this.isTransaction && client)) {
+      return;
+    }
+    this.client = null;
+    this.isTransaction = false;
+    let rollbackError: unknown;
+    try {
+      await client.query('ROLLBACK');
+    } catch (err) {
+      rollbackError = err;
+      throw err;
+    } finally {
+      // On ROLLBACK failure the connection may be in an unknown state — pass the
+      // error to release() so pg discards it instead of reusing a broken client.
+      client.release(rollbackError as Error | undefined);
     }
   }
 
