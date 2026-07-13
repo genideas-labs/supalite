@@ -202,10 +202,15 @@ describe('transaction connection cleanup on failure', () => {
     poolConnect().mockResolvedValueOnce(c);
     const client = new SupaLitePG({ connectionString: 'postgresql://mock' });
 
-    await client.begin();
-    await expect(client.commit()).rejects.toThrow('commit failed');
+    // begin() returns a connection-scoped handle; the tx state lives on it, not
+    // on the shared `client`.
+    const tx = await client.begin();
+    await expect(tx.commit()).rejects.toThrow('commit failed');
     expect(c.release).toHaveBeenCalledTimes(1);
     expect(c.release).toHaveBeenCalledWith(expect.any(Error)); // discard broken client
+    expect(privateOf(tx, 'client')).toBeNull();
+    expect(privateOf(tx, 'isTransaction')).toBe(false);
+    // The shared client was never mutated.
     expect(privateOf(client, 'client')).toBeNull();
     expect(privateOf(client, 'isTransaction')).toBe(false);
   });
@@ -215,10 +220,12 @@ describe('transaction connection cleanup on failure', () => {
     poolConnect().mockResolvedValueOnce(c);
     const client = new SupaLitePG({ connectionString: 'postgresql://mock' });
 
-    await client.begin();
-    await expect(client.rollback()).rejects.toThrow('rollback failed');
+    const tx = await client.begin();
+    await expect(tx.rollback()).rejects.toThrow('rollback failed');
     expect(c.release).toHaveBeenCalledTimes(1);
     expect(c.release).toHaveBeenCalledWith(expect.any(Error)); // discard broken client
+    expect(privateOf(tx, 'client')).toBeNull();
+    expect(privateOf(tx, 'isTransaction')).toBe(false);
     expect(privateOf(client, 'client')).toBeNull();
     expect(privateOf(client, 'isTransaction')).toBe(false);
   });
