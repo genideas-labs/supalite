@@ -1121,7 +1121,7 @@ class QueryBuilder {
             }
             return {
                 data: [],
-                error: new errors_1.PostgresError(err.message),
+                error: new errors_1.PostgresError(err instanceof Error ? err.message : String(err)),
                 count: null,
                 status: 500,
                 statusText: 'Internal Server Error',

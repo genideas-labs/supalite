@@ -20,6 +20,12 @@ type SchemaWithTables = {
     Enums?: any;
     CompositeTypes?: any;
 };
+/** A resolved foreign-key relationship used for PostgREST-style embeds. */
+type ForeignKeyInfo = {
+    column: string;
+    foreignColumn: string;
+    isArray: boolean;
+};
 export declare class RpcBuilder implements Promise<any> {
     private pool;
     private schema;
@@ -110,11 +116,7 @@ export declare class SupaLitePG<T extends {
         single(): Promise<SingleQueryResult<Row<T, S, K>>>;
     };
     getColumnPgType(dbSchema: string, tableName: string, columnName: string): Promise<string | undefined>;
-    getForeignKey(schema: string, table: string, foreignTable: string): Promise<{
-        column: string;
-        foreignColumn: string;
-        isArray: boolean;
-    } | null>;
+    getForeignKey(schema: string, table: string, foreignTable: string): Promise<ForeignKeyInfo | null>;
     rpc(procedureName: string, params?: Record<string, any>): RpcBuilder;
     testConnection(): Promise<boolean>;
     close(): Promise<void>;
