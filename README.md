@@ -22,11 +22,13 @@ Compatibility at a glance:
 - ✅ RPC (including `single`/`maybeSingle`)
 - ❌ Auth/Storage/Realtime
 
-## 0.12.0 Highlights
+## 0.13.0 Highlights
 
-- **`supalite migrate mark-applied --dry-run` (#14)**: preview a prod adoption before the first write — a **write-free** probe that prints the exact versions it would record and the exact SQL it would run, without creating the tracking table. `up --dry-run` is now write-free too and lists each pending migration's file path.
+- **Manual transactions are now safe on a shared singleton (#17 follow-up)** — **breaking**: `begin()` returns a **connection-scoped handle** (`const tx = await db.begin(); … await tx.commit()`) instead of mutating the client, so calling it on a module-global singleton no longer routes other concurrent queries into the transaction. `commit()`/`rollback()` (and a nested `begin()`) now throw when misused; transaction scopes no longer share their metadata cache with the owner. `transaction(cb)` is unchanged. See [Transactions](#transactions) for migration.
 
-Earlier (0.11.0): **`supalite migrate` (#7)** — a built-in `up` / `status` / `new` / `mark-applied` runner (advisory-locked, atomic per-migration recording, `transaction:false` escape) closing the `db pull → migrate → gen types` toolchain; **`db pull --format dbmate` (#8)** wraps the baseline in `-- migrate:up` / `-- migrate:down` markers; fixed a `gen types` casing bug (`splitWords` dropped the letter `s`).
+Earlier (0.12.0): **`supalite migrate mark-applied --dry-run` (#14)** — a **write-free** prod-adoption preview (exact versions + SQL, no writes); `up --dry-run` write-free with file paths.
+
+Earlier (0.11.0): **`supalite migrate` (#7)** — a built-in `up` / `status` / `new` / `mark-applied` runner (advisory-locked, atomic per-migration recording, `transaction:false` escape) closing the `db pull → migrate → gen types` toolchain; **`db pull --format dbmate` (#8)** wraps the baseline in `-- migrate:up` / `-- migrate:down` markers.
 
 Earlier (0.7.2): `gen types --format supabase` matches Supabase CLI byte-for-byte; default `--format supalite` superset (constraints/indexes, referenced schema, setof RPC options); BigInt controls `--no-bigint` / `--no-json-bigint`.
 

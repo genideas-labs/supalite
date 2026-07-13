@@ -116,17 +116,26 @@ describe('transaction isolation (concurrency-safe scope)', () => {
         // per transaction could flip BIGINT parsing for other clients in the process.
         expect(setTypeParser.mock.calls.length).toBe(callsAfterConstruct);
     });
-    it('shares read-mostly metadata caches between parent and transaction scope', async () => {
+    it('seeds a transaction scope with a COPY of the metadata caches (writes stay isolated)', async () => {
         const c = makeClient();
         poolConnect().mockResolvedValueOnce(c);
         const client = new postgres_client_1.SupaLitePG({ connectionString: 'postgresql://mock' });
+        // Pre-seed the owner cache so we can observe that the scope inherits entries.
+        const ownerSchemaCache = privateOf(client, 'schemaCache');
+        ownerSchemaCache.set('public.seed', new Map([['id', 'integer']]));
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         let scope;
         await client.transaction(async (tx) => {
             scope = tx;
+            // The scope gets a COPY, not the same reference...
+            expect(scope.schemaCache).not.toBe(privateOf(client, 'schemaCache'));
+            expect(scope.foreignKeyCache).not.toBe(privateOf(client, 'foreignKeyCache'));
+            // ...seeded with the owner's existing entries (no cold re-lookup)...
+            expect(scope.schemaCache.has('public.seed')).toBe(true);
+            // ...and a write inside the transaction does NOT leak back to the owner.
+            scope.schemaCache.set('public.txonly', new Map([['x', 'text']]));
         });
-        expect(scope.schemaCache).toBe(privateOf(client, 'schemaCache'));
-        expect(scope.foreignKeyCache).toBe(privateOf(client, 'foreignKeyCache'));
+        expect(privateOf(client, 'schemaCache').has('public.txonly')).toBe(false);
     });
     it('transaction scopes do not attach error listeners to the shared pool', async () => {
         poolConnect().mockImplementation(() => Promise.resolve(makeClient()));
@@ -173,10 +182,15 @@ describe('transaction connection cleanup on failure', () => {
         const c = clientThatFailsOn('COMMIT', 'commit failed');
         poolConnect().mockResolvedValueOnce(c);
         const client = new postgres_client_1.SupaLitePG({ connectionString: 'postgresql://mock' });
-        await client.begin();
-        await expect(client.commit()).rejects.toThrow('commit failed');
+        // begin() returns a connection-scoped handle; the tx state lives on it, not
+        // on the shared `client`.
+        const tx = await client.begin();
+        await expect(tx.commit()).rejects.toThrow('commit failed');
         expect(c.release).toHaveBeenCalledTimes(1);
         expect(c.release).toHaveBeenCalledWith(expect.any(Error)); // discard broken client
+        expect(privateOf(tx, 'client')).toBeNull();
+        expect(privateOf(tx, 'isTransaction')).toBe(false);
+        // The shared client was never mutated.
         expect(privateOf(client, 'client')).toBeNull();
         expect(privateOf(client, 'isTransaction')).toBe(false);
     });
@@ -184,10 +198,12 @@ describe('transaction connection cleanup on failure', () => {
         const c = clientThatFailsOn('ROLLBACK', 'rollback failed');
         poolConnect().mockResolvedValueOnce(c);
         const client = new postgres_client_1.SupaLitePG({ connectionString: 'postgresql://mock' });
-        await client.begin();
-        await expect(client.rollback()).rejects.toThrow('rollback failed');
+        const tx = await client.begin();
+        await expect(tx.rollback()).rejects.toThrow('rollback failed');
         expect(c.release).toHaveBeenCalledTimes(1);
         expect(c.release).toHaveBeenCalledWith(expect.any(Error)); // discard broken client
+        expect(privateOf(tx, 'client')).toBeNull();
+        expect(privateOf(tx, 'isTransaction')).toBe(false);
         expect(privateOf(client, 'client')).toBeNull();
         expect(privateOf(client, 'isTransaction')).toBe(false);
     });
