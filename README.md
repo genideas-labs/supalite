@@ -1063,7 +1063,21 @@ await client.transaction(async (tx) => {
 
 `transaction(cb)` runs the callback on an **isolated, connection-bound scope**. Each call checks out its own pooled connection, so concurrent `transaction(cb)` calls on the same client never interfere, and plain (non-transactional) queries keep using the pool. The transaction commits if the callback resolves and rolls back if it throws — a rollback failure never masks the original error, and the connection is always returned to the pool.
 
-> Use `transaction(cb)` rather than manual `begin()` / `commit()` / `rollback()`. The manual methods mutate the client instance and are **not** concurrency-safe (kept for backward compatibility, deprecated).
+For manual control (a transaction spanning several functions, or conditional commit points), `begin()` returns a **connection-scoped handle**. It borrows one connection from the pool and is safe to call on a shared singleton — the singleton itself is never mutated, so concurrent queries through it are unaffected:
+
+```typescript
+const tx = await client.begin();          // borrows one connection, runs BEGIN
+try {
+  await tx.from('accounts').update({ balance: 100 }).eq('id', 1);
+  await tx.from('ledger').insert({ account_id: 1, delta: 100 });
+  await tx.commit();                       // COMMIT + release the connection
+} catch (e) {
+  await tx.rollback();                     // ROLLBACK + release the connection
+  throw e;
+}
+```
+
+Run your statements on the returned `tx` handle (not on `client`). `commit()` / `rollback()` finalize the handle and release its connection; calling them with no active transaction throws, as does a nested `begin()`. Prefer `transaction(cb)` when you don't need manual control — it commits, rolls back, and releases the connection for you.
 
 ### Connection check
 
@@ -1118,10 +1132,9 @@ await client.close();
 
 ### Transaction methods
 
-- `transaction<T>(callback: (client: SupaLitePG) => Promise<T>)` — concurrency-safe; runs on an isolated scope, commits on success, rolls back on throw
-- `begin()` — _deprecated_: mutates the instance and is not concurrency-safe; use `transaction(cb)`
-- `commit()` — _deprecated_: use `transaction(cb)`
-- `rollback()` — _deprecated_: use `transaction(cb)`
+- `transaction<T>(callback: (tx: SupaLitePG) => Promise<T>)` — auto-managed; runs on an isolated scope, commits on success, rolls back on throw, always releases the connection
+- `begin(): Promise<SupaLitePG>` — manual control; returns a **connection-scoped handle** (safe on a shared singleton). Run statements on the returned handle; throws on a nested `begin()`
+- `commit()` / `rollback()` — finalize the handle from `begin()` and release its connection; throw if there is no active transaction
 
 ### Client methods
 

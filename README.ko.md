@@ -1051,7 +1051,21 @@ await client.transaction(async (tx) => {
 
 `transaction(cb)`은 콜백을 **격리된 연결 전용 스코프**에서 실행합니다. 호출마다 풀에서 자체 연결을 확보하므로, 같은 클라이언트에서 동시에 실행되는 `transaction(cb)`끼리 서로 간섭하지 않고, 일반(비트랜잭션) 쿼리는 계속 풀을 사용합니다. 콜백이 정상 종료하면 커밋하고 예외가 발생하면 롤백하며 — 롤백 실패가 원래 에러를 가리지 않고, 연결은 항상 풀로 반환됩니다.
 
-> 수동 `begin()` / `commit()` / `rollback()` 대신 `transaction(cb)`을 사용하세요. 수동 메소드는 클라이언트 인스턴스 상태를 변경하며 동시성에 **안전하지 않습니다**(하위 호환을 위해 유지, deprecated).
+수동 제어(여러 함수에 걸친 트랜잭션, 조건부 커밋)가 필요하면 `begin()`이 **연결 고정 핸들**을 반환합니다. 풀에서 연결 1개를 빌리며, 공유 싱글턴에 호출해도 안전합니다 — 싱글턴 자신은 변경되지 않으므로 그 사이 다른 동시 쿼리는 영향받지 않습니다:
+
+```typescript
+const tx = await client.begin();          // 연결 1개 확보, BEGIN
+try {
+  await tx.from('accounts').update({ balance: 100 }).eq('id', 1);
+  await tx.from('ledger').insert({ account_id: 1, delta: 100 });
+  await tx.commit();                       // COMMIT + 연결 반납
+} catch (e) {
+  await tx.rollback();                     // ROLLBACK + 연결 반납
+  throw e;
+}
+```
+
+문장은 `client`가 아니라 반환된 `tx` 핸들에서 실행하세요. `commit()` / `rollback()`은 핸들을 종료하고 연결을 반납합니다. 활성 트랜잭션이 없을 때 호출하면 throw하며, 중첩 `begin()`도 throw합니다. 수동 제어가 필요 없으면 `transaction(cb)`을 사용하세요(커밋·롤백·연결 반납 자동).
 
 ### 연결 확인
 
@@ -1102,10 +1116,9 @@ await client.close();
 
 ### 트랜잭션 메소드
 
-- `transaction<T>(callback: (client: SupaLitePG) => Promise<T>)`: 트랜잭션 실행 (동시성 안전, 격리 스코프에서 실행되어 성공 시 커밋·예외 시 롤백)
-- `begin()`: 트랜잭션 시작 — _deprecated_: 인스턴스 상태를 변경하며 동시성 비안전, `transaction(cb)` 사용
-- `commit()`: 트랜잭션 커밋 — _deprecated_: `transaction(cb)` 사용
-- `rollback()`: 트랜잭션 롤백 — _deprecated_: `transaction(cb)` 사용
+- `transaction<T>(callback: (tx: SupaLitePG) => Promise<T>)`: 자동 관리 트랜잭션 (격리 스코프, 성공 시 커밋·예외 시 롤백, 연결 자동 반납)
+- `begin(): Promise<SupaLitePG>`: 수동 제어 — **연결 고정 핸들** 반환(공유 싱글턴에서 안전). 반환된 핸들에서 문장 실행, 중첩 `begin()`은 throw
+- `commit()` / `rollback()`: `begin()` 핸들을 종료하고 연결 반납; 활성 트랜잭션이 없으면 throw
 
 ### 클라이언트 메소드
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed (BREAKING → 0.13.0)
+- Manual transaction API is now **connection-scoped and safe on a shared singleton** (follow-up to #17). `begin()` no longer mutates the instance — it returns a **connection-scoped handle** (`Promise<SupaLitePG<T>>`, was `Promise<void>`) bound to one borrowed connection; run your statements on the returned handle and finalize with `handle.commit()` / `handle.rollback()`. Calling a shared singleton's `begin()` no longer poisons the query router, so concurrent queries through the singleton are unaffected. **Migration**: `await db.begin(); await db.from(...); await db.commit()` → `const tx = await db.begin(); await tx.from(...); await tx.commit()`.
+- `commit()` / `rollback()` now **throw** `no active transaction …` when there is no active transaction (was a silent no-op); a nested `begin()` on an open handle throws `nested transactions are not supported`.
+- The `@deprecated "not concurrency-safe"` notes on `begin`/`commit`/`rollback` are removed — they are now the safe manual API. `transaction(cb)` is **unchanged** (already connection-scoped since v0.9.0).
+
+### Fixed
+- Transaction scopes no longer share their metadata caches (`schemaCache`/`foreignKeyCache`) with the owner by reference — they get a **shallow copy** seeded from the owner. Known tables still hit the copy (no cold `information_schema` lookup), but metadata read inside a transaction (e.g. from uncommitted DDL) lands only in the scope's copy and is discarded when the transaction ends, so a rolled-back transaction can't pollute the owner's cache. (Also applies to `transaction(cb)`.)
+
+### Tests
+- New `manual-transaction.test.ts`: commit persists + singleton untouched, rollback atomicity, two concurrent handles isolated, singleton non-tx query unaffected during an open handle, no-leak under a 1-connection pool (commit/rollback/exception), **concurrent commit()+rollback() on one handle** (atomic finalize, no double-release), **tx-cached metadata does not pollute the owner**, no-tx `commit()/rollback()` throws, nested `begin()` throws, handle single-use. Release-on-failure and query-routing tests reworked to the handle model.
+
 ## [0.12.0] - 2026-07-12
 
 ### Added
