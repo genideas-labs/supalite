@@ -51,8 +51,8 @@ describe('QueryBuilder transaction execution', () => {
         mockClientQuery
             .mockResolvedValueOnce({ rows: [], rowCount: 0 })
             .mockResolvedValueOnce({ rows: [{ id: 2 }], rowCount: 1 });
-        await client.begin();
-        const result = await client.from('users').select('*');
+        const tx = await client.begin();
+        const result = await tx.from('users').select('*');
         expect(result.data).toEqual([{ id: 2 }]);
         expect(mockPoolQuery).not.toHaveBeenCalled();
         const selectCall = mockClientQuery.mock.calls.find((call) => String(call[0]).startsWith('SELECT'));

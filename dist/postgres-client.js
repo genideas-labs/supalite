@@ -288,11 +288,11 @@ class SupaLitePG {
         }
     }
     /**
-     * @deprecated Manual transaction control mutates this instance and is NOT
-     * concurrency-safe. Use `transaction(cb)` instead.
+     * Internal transaction plumbing — mutates THIS instance's connection state.
+     * Only ever invoked on a fresh per-transaction scope (from `begin()` /
+     * `transaction()`), never on a shared instance, so the mutation is safe.
      */
-    // 트랜잭션 시작
-    async begin() {
+    async startTx() {
         if (!this.client) {
             this.client = await this.pool.connect();
         }
@@ -310,52 +310,52 @@ class SupaLitePG {
             throw err;
         }
     }
-    /**
-     * @deprecated Manual transaction control mutates this instance and is NOT
-     * concurrency-safe. Use `transaction(cb)` instead, which runs on an isolated scope.
-     */
-    // 트랜잭션 커밋
-    async commit() {
-        if (this.isTransaction && this.client) {
-            let commitError;
-            try {
-                await this.client.query('COMMIT');
-            }
-            catch (err) {
-                commitError = err;
-                throw err;
-            }
-            finally {
-                // On COMMIT failure the connection may be in an unknown state — pass the
-                // error to release() so pg discards it instead of reusing a broken client.
-                this.client.release(commitError);
-                this.client = null;
-                this.isTransaction = false;
-            }
+    /** Internal: COMMIT + release on the scope's own connection (see startTx). */
+    async commitTx() {
+        // Capture the connection and clear the transaction state SYNCHRONOUSLY, before
+        // any await, so a concurrent finalize on the same handle (e.g. commit() racing
+        // rollback()) sees no active transaction and cannot double-release the client.
+        const client = this.client;
+        if (!(this.isTransaction && client)) {
+            return;
+        }
+        this.client = null;
+        this.isTransaction = false;
+        let commitError;
+        try {
+            await client.query('COMMIT');
+        }
+        catch (err) {
+            commitError = err;
+            throw err;
+        }
+        finally {
+            // On COMMIT failure the connection may be in an unknown state — pass the
+            // error to release() so pg discards it instead of reusing a broken client.
+            client.release(commitError);
         }
     }
-    /**
-     * @deprecated Manual transaction control mutates this instance and is NOT
-     * concurrency-safe. Use `transaction(cb)` instead, which runs on an isolated scope.
-     */
-    // 트랜잭션 롤백
-    async rollback() {
-        if (this.isTransaction && this.client) {
-            let rollbackError;
-            try {
-                await this.client.query('ROLLBACK');
-            }
-            catch (err) {
-                rollbackError = err;
-                throw err;
-            }
-            finally {
-                // On ROLLBACK failure the connection may be in an unknown state — pass the
-                // error to release() so pg discards it instead of reusing a broken client.
-                this.client.release(rollbackError);
-                this.client = null;
-                this.isTransaction = false;
-            }
+    /** Internal: ROLLBACK + release on the scope's own connection (see startTx). */
+    async rollbackTx() {
+        // Capture + clear synchronously (see commitTx) to make finalization atomic.
+        const client = this.client;
+        if (!(this.isTransaction && client)) {
+            return;
+        }
+        this.client = null;
+        this.isTransaction = false;
+        let rollbackError;
+        try {
+            await client.query('ROLLBACK');
+        }
+        catch (err) {
+            rollbackError = err;
+            throw err;
+        }
+        finally {
+            // On ROLLBACK failure the connection may be in an unknown state — pass the
+            // error to release() so pg discards it instead of reusing a broken client.
+            client.release(rollbackError);
         }
     }
     /**
@@ -382,26 +382,76 @@ class SupaLitePG {
         finally {
             skipNextTypeParserSetup = false;
         }
-        // Share the read-mostly metadata caches so each transaction doesn't cold-populate
-        // information_schema. Safe: caches are append-only after the first miss, and JS is
-        // single-threaded (no torn writes across awaits).
-        scope.schemaCache = this.schemaCache;
-        scope.foreignKeyCache = this.foreignKeyCache;
+        // Seed the scope with a SHALLOW COPY of the metadata caches (not a shared
+        // reference). Reads of already-known tables still hit the copy (no cold
+        // information_schema lookup), but any cache write inside the transaction —
+        // e.g. metadata for a table created by uncommitted DDL — lands only in the
+        // scope's copy and is discarded when the transaction ends. This keeps the
+        // owner's cache from being polluted by uncommitted schema that a rollback
+        // would undo. Entries are immutable after creation (a miss replaces the whole
+        // inner map), so a shallow copy is safe.
+        scope.schemaCache = new Map(this.schemaCache);
+        scope.foreignKeyCache = new Map(this.foreignKeyCache);
         return scope;
+    }
+    /**
+     * Begins a transaction and returns a **connection-scoped handle** — a child
+     * client bound to one connection borrowed from the shared pool. This instance
+     * is NOT mutated, so calling `begin()` on a shared singleton is concurrency-safe:
+     * run your statements on the returned handle and finalize with
+     * `handle.commit()` / `handle.rollback()`.
+     *
+     * ```ts
+     * const tx = await db.begin();
+     * try { await tx.from('t').insert(row); await tx.commit(); }
+     * catch (e) { await tx.rollback(); throw e; }
+     * ```
+     *
+     * For fully-managed transactions prefer {@link transaction} (auto commit/rollback
+     * and connection release). Nested transactions (calling `begin()` on a handle)
+     * are not supported.
+     */
+    async begin() {
+        if (this.isTransaction) {
+            throw new Error('nested transactions are not supported');
+        }
+        const tx = this.createTransactionScope();
+        await tx.startTx();
+        return tx;
+    }
+    /**
+     * Commits the transaction on this handle (from {@link begin}) and releases its
+     * connection. Throws if there is no active transaction.
+     */
+    async commit() {
+        if (!(this.isTransaction && this.client)) {
+            throw new Error('no active transaction — call begin() to obtain a transaction handle');
+        }
+        await this.commitTx();
+    }
+    /**
+     * Rolls back the transaction on this handle (from {@link begin}) and releases its
+     * connection. Throws if there is no active transaction.
+     */
+    async rollback() {
+        if (!(this.isTransaction && this.client)) {
+            throw new Error('no active transaction — call begin() to obtain a transaction handle');
+        }
+        await this.rollbackTx();
     }
     // 트랜잭션 실행 (concurrency-safe: isolated scope per call)
     async transaction(callback) {
         const tx = this.createTransactionScope();
-        await tx.begin();
+        await tx.startTx();
         try {
             const result = await callback(tx);
-            await tx.commit();
+            await tx.commitTx();
             return result;
         }
         catch (error) {
             // Roll back, but never let a rollback failure mask the original error.
             try {
-                await tx.rollback();
+                await tx.rollbackTx();
             }
             catch (rollbackError) {
                 if (this.verbose) {

@@ -57,20 +57,15 @@ export declare class SupaLitePG<T extends {
     private ownsPool;
     constructor(config?: SupaliteConfig);
     /**
-     * @deprecated Manual transaction control mutates this instance and is NOT
-     * concurrency-safe. Use `transaction(cb)` instead.
+     * Internal transaction plumbing — mutates THIS instance's connection state.
+     * Only ever invoked on a fresh per-transaction scope (from `begin()` /
+     * `transaction()`), never on a shared instance, so the mutation is safe.
      */
-    begin(): Promise<void>;
-    /**
-     * @deprecated Manual transaction control mutates this instance and is NOT
-     * concurrency-safe. Use `transaction(cb)` instead, which runs on an isolated scope.
-     */
-    commit(): Promise<void>;
-    /**
-     * @deprecated Manual transaction control mutates this instance and is NOT
-     * concurrency-safe. Use `transaction(cb)` instead, which runs on an isolated scope.
-     */
-    rollback(): Promise<void>;
+    private startTx;
+    /** Internal: COMMIT + release on the scope's own connection (see startTx). */
+    private commitTx;
+    /** Internal: ROLLBACK + release on the scope's own connection (see startTx). */
+    private rollbackTx;
     /**
      * Creates an isolated SupaLitePG bound to the SAME pool but with independent
      * transaction state (its own `client`/`isTransaction`). Used by transaction()
@@ -78,6 +73,34 @@ export declare class SupaLitePG<T extends {
      * is shared and not owned (no error listener is attached — see constructor).
      */
     private createTransactionScope;
+    /**
+     * Begins a transaction and returns a **connection-scoped handle** — a child
+     * client bound to one connection borrowed from the shared pool. This instance
+     * is NOT mutated, so calling `begin()` on a shared singleton is concurrency-safe:
+     * run your statements on the returned handle and finalize with
+     * `handle.commit()` / `handle.rollback()`.
+     *
+     * ```ts
+     * const tx = await db.begin();
+     * try { await tx.from('t').insert(row); await tx.commit(); }
+     * catch (e) { await tx.rollback(); throw e; }
+     * ```
+     *
+     * For fully-managed transactions prefer {@link transaction} (auto commit/rollback
+     * and connection release). Nested transactions (calling `begin()` on a handle)
+     * are not supported.
+     */
+    begin(): Promise<SupaLitePG<T>>;
+    /**
+     * Commits the transaction on this handle (from {@link begin}) and releases its
+     * connection. Throws if there is no active transaction.
+     */
+    commit(): Promise<void>;
+    /**
+     * Rolls back the transaction on this handle (from {@link begin}) and releases its
+     * connection. Throws if there is no active transaction.
+     */
+    rollback(): Promise<void>;
     transaction<R>(callback: (client: SupaLitePG<T>) => Promise<R>): Promise<R>;
     getQueryClient(): Pool | PoolClient;
     from<K extends TableOrViewName<T, 'public'>>(table: K): QueryBuilder<T, 'public', K> & Promise<QueryResult<Row<T, 'public', K>>> & {
