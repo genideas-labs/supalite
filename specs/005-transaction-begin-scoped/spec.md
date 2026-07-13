@@ -2,7 +2,7 @@
 
 **Feature Branch**: `005-transaction-begin-scoped`
 **Created**: 2026-07-13
-**Status**: Draft
+**Status**: Implemented
 **Input**: Follow-up to [#17](https://github.com/genideas-labs/supalite/issues/17) — `transaction(cb)` is already connection-scoped (v0.9.0); this closes the same gap for the **manual** `begin()/commit()/rollback()` API. Breaking change explicitly approved by the maintainer (the manual API is unused downstream).
 
 ## User Scenarios & Testing
