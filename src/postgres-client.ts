@@ -447,11 +447,16 @@ export class SupaLitePG<T extends { [K: string]: SchemaWithTables }> {
     } finally {
       skipNextTypeParserSetup = false;
     }
-    // Share the read-mostly metadata caches so each transaction doesn't cold-populate
-    // information_schema. Safe: caches are append-only after the first miss, and JS is
-    // single-threaded (no torn writes across awaits).
-    scope.schemaCache = this.schemaCache;
-    scope.foreignKeyCache = this.foreignKeyCache;
+    // Seed the scope with a SHALLOW COPY of the metadata caches (not a shared
+    // reference). Reads of already-known tables still hit the copy (no cold
+    // information_schema lookup), but any cache write inside the transaction —
+    // e.g. metadata for a table created by uncommitted DDL — lands only in the
+    // scope's copy and is discarded when the transaction ends. This keeps the
+    // owner's cache from being polluted by uncommitted schema that a rollback
+    // would undo. Entries are immutable after creation (a miss replaces the whole
+    // inner map), so a shallow copy is safe.
+    scope.schemaCache = new Map(this.schemaCache);
+    scope.foreignKeyCache = new Map(this.foreignKeyCache);
     return scope;
   }
 

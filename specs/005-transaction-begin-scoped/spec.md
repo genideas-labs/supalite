@@ -71,9 +71,10 @@ try {
   not mutated (that is the whole point).
 - A handle is single-use: after `commit()`/`rollback()` its connection is released and
   `isTransaction` is false; calling `commit()`/`rollback()` again throws (no active tx).
-- The scoped handle shares the singleton's pool (`ownsPool=false`) and read-mostly
-  metadata caches; it attaches no pool error listener (unchanged from
-  `createTransactionScope`).
+- The scoped handle shares the singleton's pool (`ownsPool=false`) and gets a **shallow
+  copy** of the read-mostly metadata caches (seeded from the owner, but writes stay
+  isolated so uncommitted-DDL metadata can't survive a rollback into the owner cache); it
+  attaches no pool error listener (unchanged from `createTransactionScope`).
 - BIGINT type-parser setup is not re-run per handle (the `skipNextTypeParserSetup` guard
   is preserved).
 

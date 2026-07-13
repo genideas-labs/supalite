@@ -136,6 +136,22 @@ describe('manual transaction handle (begin/commit/rollback, scoped)', () => {
     }
   });
 
+  it('metadata cached inside a transaction does not pollute the shared singleton cache', async () => {
+    const tx = await db.begin();
+    try {
+      // Populate the scope's metadata cache for a table.
+      await tx.getColumnPgType('public', 'manual_tx_test', 'id');
+      // The scope cached it; the shared singleton must NOT have the entry — a write
+      // inside the transaction lands only in the scope's copy (discarded on end).
+      expect((tx as any).schemaCache.has('public.manual_tx_test')).toBe(true);
+      expect((db as any).schemaCache.has('public.manual_tx_test')).toBe(false);
+    } finally {
+      await tx.rollback();
+    }
+    // After rollback the owner cache is still clean.
+    expect((db as any).schemaCache.has('public.manual_tx_test')).toBe(false);
+  });
+
   it('commit()/rollback() with no active transaction throw', async () => {
     await expect(db.commit()).rejects.toThrow('no active transaction');
     await expect(db.rollback()).rejects.toThrow('no active transaction');

@@ -7,8 +7,11 @@
 - `commit()` / `rollback()` now **throw** `no active transaction …` when there is no active transaction (was a silent no-op); a nested `begin()` on an open handle throws `nested transactions are not supported`.
 - The `@deprecated "not concurrency-safe"` notes on `begin`/`commit`/`rollback` are removed — they are now the safe manual API. `transaction(cb)` is **unchanged** (already connection-scoped since v0.9.0).
 
+### Fixed
+- Transaction scopes no longer share their metadata caches (`schemaCache`/`foreignKeyCache`) with the owner by reference — they get a **shallow copy** seeded from the owner. Known tables still hit the copy (no cold `information_schema` lookup), but metadata read inside a transaction (e.g. from uncommitted DDL) lands only in the scope's copy and is discarded when the transaction ends, so a rolled-back transaction can't pollute the owner's cache. (Also applies to `transaction(cb)`.)
+
 ### Tests
-- New `manual-transaction.test.ts`: commit persists + singleton untouched, rollback atomicity, two concurrent handles isolated, singleton non-tx query unaffected during an open handle, no-leak under a 1-connection pool (commit/rollback/exception), no-tx `commit()/rollback()` throws, nested `begin()` throws, handle single-use. Release-on-failure and query-routing tests reworked to the handle model.
+- New `manual-transaction.test.ts`: commit persists + singleton untouched, rollback atomicity, two concurrent handles isolated, singleton non-tx query unaffected during an open handle, no-leak under a 1-connection pool (commit/rollback/exception), **concurrent commit()+rollback() on one handle** (atomic finalize, no double-release), **tx-cached metadata does not pollute the owner**, no-tx `commit()/rollback()` throws, nested `begin()` throws, handle single-use. Release-on-failure and query-routing tests reworked to the handle model.
 
 ## [0.12.0] - 2026-07-12
 

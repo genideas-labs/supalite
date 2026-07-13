@@ -34,11 +34,13 @@ unchanged.
   Fix: capture the client and clear `client`/`isTransaction` **synchronously before the
   await** in `commitTx`/`rollbackTx`, so a racing finalizer sees no active tx and throws.
   Covered by a new concurrent-finalize test.
-- **[P2] shared metadata caches — DEFERRED (pre-existing, out of scope).** Scopes share
-  `schemaCache`/`foreignKeyCache` with the singleton (since v0.9.0's `createTransactionScope`;
-  `transaction(cb)` has the same property). Uncommitted-DDL metadata read inside a tx can
-  survive rollback and be reused. Narrow (DDL-in-tx + query-in-tx + rollback + name reuse).
-  Not introduced by this feature → tracked as a **follow-up** (see below), not fixed here.
+- **[P2] shared metadata caches — FIXED.** Scopes shared `schemaCache`/`foreignKeyCache`
+  with the singleton by reference (since v0.9.0), so uncommitted-DDL metadata read inside a
+  tx could survive rollback and pollute the owner. Fixed: `createTransactionScope()` now
+  seeds the scope with a **shallow copy** (`new Map(...)`) — known tables still hit the copy
+  (no cold information_schema lookup), but writes inside the tx land only in the scope's copy
+  and are discarded when it ends. Covered by a new isolation test (scope write not visible on
+  the owner) and the reworked "seeds a scope with a COPY" unit test.
 - **[P2] overclaiming test name — FIXED.** The mid-tx-exception test was renamed to
   "caller-handled mid-tx exception" — the manual API relies on the caller to `rollback()`;
   only `transaction(cb)` guarantees cleanup on an unhandled throw.
@@ -56,8 +58,9 @@ unchanged.
 
 ## 후속 작업
 
-- **Follow-up issue (cache isolation)**: don't let transaction-populated `schemaCache`/
-  `foreignKeyCache` entries contaminate the singleton after rollback (copy-on-write per
-  scope, or invalidate/merge only after commit). Pre-existing since v0.9.0; low severity.
+- Optional perf: a committed transaction's newly-discovered table metadata no longer
+  back-propagates to the owner cache (the shallow-copy trade-off), so a table only ever
+  queried inside transactions re-reads information_schema each time. Negligible for typical
+  apps; a merge-on-commit optimization could restore it if it ever matters.
 - Ship in 0.13.0 (breaking): version bump + CHANGELOG rename + dist rebuild + tag; maintainer
   runs `npm publish`.
