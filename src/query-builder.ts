@@ -1,3 +1,13 @@
+/*
+ * `any` in this file is deliberate: QueryBuilder is a dynamic SQL builder that
+ * accepts arbitrary user filter/insert/update values, carries them as untyped
+ * bind-parameter arrays (`whereValues`/`values`), and reshapes arbitrary result
+ * rows. These positions have no meaningful static type (the column value types
+ * live in the user's generated schema, not here), so `any` is the working type.
+ * Genuine bugs (e.g. error narrowing) are still fixed to `unknown`; this disable
+ * only covers the intentional dynamic surface.
+ */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Pool, PoolClient } from 'pg';
 import { PostgresError } from './errors';
 import type { SupaLitePG } from './postgres-client'; // Import SupaLitePG type
@@ -1343,13 +1353,13 @@ export class QueryBuilder<
         status: 200,
         statusText: 'OK',
       } as QueryResult<Row<T, S, K>>;
-    } catch (err: any) {
+    } catch (err) {
       if (this.verbose) {
         console.error('[SupaLite VERBOSE] Error:', err);
       }
       return {
         data: [],
-        error: new PostgresError(err.message),
+        error: new PostgresError(err instanceof Error ? err.message : String(err)),
         count: null,
         status: 500,
         statusText: 'Internal Server Error',
