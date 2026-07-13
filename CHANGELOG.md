@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.13.1] - 2026-07-13
+
+### Changed (internal)
+- Typing cleanup: `npm run lint` now reports **0 warnings** (was 191 `no-explicit-any`), with no behavior change. Real fixes include `PostgresError`'s `pgError` argument (`any` → `PgErrorLike`), the internal transaction connection field (`any` → `PoolClient | null`), the foreign-key cache (`any` → `ForeignKeyInfo | null`), all `catch (err: any)` blocks narrowed to `unknown`, and removal of unnecessary `release()` casts. The irreducible dynamic surfaces (arbitrary user-schema row/value shapes, the `RpcBuilder` thenable, and the dynamic SQL query-builder) keep `any` by design, now documented with rationale; `no-explicit-any` is disabled for test files. No public API or runtime behavior change.
+- `npm test` now runs with `--runInBand` (was `--maxWorkers=50%`). The parallel ts-node CLI tests intermittently flaked under spawn/DB contention, occasionally failing the `prepublishOnly` gate; serial execution makes the release gate deterministic.
+
 ## [0.13.0] - 2026-07-13
 
 ### Changed (BREAKING)

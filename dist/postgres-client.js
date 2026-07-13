@@ -10,6 +10,10 @@ const dotenv_1 = require("dotenv");
 (0, dotenv_1.config)();
 const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 const MIN_SAFE_BIGINT = BigInt(Number.MIN_SAFE_INTEGER);
+// RpcBuilder is a dynamically-typed thenable: it implements `Promise<any>` and
+// carries arbitrary RPC params/return values (a function's shape is only known at
+// runtime), so `any` across its Promise interface and result data is deliberate.
+/* eslint-disable @typescript-eslint/no-explicit-any */
 class RpcBuilder {
     constructor(pool, schema, procedureName, params = {}) {
         this.pool = pool;
@@ -156,7 +160,9 @@ class RpcBuilder {
         catch (err) {
             return {
                 data: null,
-                error: new errors_1.PostgresError(err.message, err.code),
+                // (err.code was historically passed as the 2nd arg, but a string has no
+                // .code so no fields were ever extracted from it — behaviour preserved.)
+                error: new errors_1.PostgresError(err instanceof Error ? err.message : String(err)),
                 count: null,
                 status: 500,
                 statusText: 'Internal Server Error'
@@ -167,6 +173,7 @@ class RpcBuilder {
 exports.RpcBuilder = RpcBuilder;
 _a = Symbol.toStringTag;
 RpcBuilder.returnTypeCache = new Map();
+/* eslint-enable @typescript-eslint/no-explicit-any */
 /**
  * Internal one-shot channel: createTransactionScope() sets this so the next
  * SupaLitePG constructor skips the process-global pg.types.setTypeParser setup
@@ -255,8 +262,9 @@ class SupaLitePG {
                     }
                 }
                 catch (err) {
-                    console.error('[SupaLite ERROR] Database connection error:', err.message);
-                    throw new Error(`Failed to establish database connection: ${err.message}`);
+                    const message = err instanceof Error ? err.message : String(err);
+                    console.error('[SupaLite ERROR] Database connection error:', message);
+                    throw new Error(`Failed to establish database connection: ${message}`);
                 }
             }
             else {
@@ -468,9 +476,10 @@ class SupaLitePG {
         return this.pool;
     }
     from(table, schema) {
-        // QueryBuilder constructor will be updated to accept these arguments
-        return new query_builder_1.QueryBuilder(// Use 'as any' temporarily if QueryBuilder constructor not yet updated
-        this.pool, this, // Pass the SupaLitePG instance itself
+        // QueryBuilder's constructor signature isn't expressible through the public
+        // generic overloads here, so this single construction cast is intentional.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return new query_builder_1.QueryBuilder(this.pool, this, // Pass the SupaLitePG instance itself
         table, schema || 'public', this.verbose // Pass verbose setting
         );
     }
@@ -503,12 +512,13 @@ class SupaLitePG {
                 }
                 finally {
                     if (!(this.isTransaction && this.client)) { // Only release if it's a temp client not managed by transaction
-                        activeClient.release(); // Cast to any if 'release' is not on type PoolClient from transaction
+                        activeClient.release();
                     }
                 }
             }
             catch (err) {
-                console.error(`[SupaLite ERROR] Failed to query information_schema for ${tableKey}:`, err.message);
+                const message = err instanceof Error ? err.message : String(err);
+                console.error(`[SupaLite ERROR] Failed to query information_schema for ${tableKey}:`, message);
                 return undefined;
             }
         }
@@ -524,7 +534,7 @@ class SupaLitePG {
     async getForeignKey(schema, table, foreignTable) {
         const cacheKey = `${schema}.${table}.${foreignTable}`;
         if (this.foreignKeyCache.has(cacheKey)) {
-            return this.foreignKeyCache.get(cacheKey);
+            return this.foreignKeyCache.get(cacheKey) ?? null;
         }
         const query = `
       SELECT
@@ -577,7 +587,11 @@ class SupaLitePG {
         this.foreignKeyCache.set(cacheKey, null);
         return null;
     }
-    rpc(procedureName, params = {}) {
+    rpc(procedureName, 
+    // RPC arguments are arbitrary (the function's parameter types are only known
+    // at runtime), so `any` values are deliberate here.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    params = {}) {
         return new RpcBuilder(this.pool, this.schema, procedureName, params);
     }
     // 연결 테스트 메서드
@@ -588,7 +602,7 @@ class SupaLitePG {
             return true;
         }
         catch (err) {
-            console.error('Connection test failed:', err.message);
+            console.error('Connection test failed:', err instanceof Error ? err.message : String(err));
             return false;
         }
     }
